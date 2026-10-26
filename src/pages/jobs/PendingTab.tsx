@@ -37,6 +37,7 @@ import {
 } from "../../lib/api";
 import { markStart, measureAndTrack } from "../../lib/perf";
 import type { Job, JobStatus, JobStats, TailorOptions } from "../../lib/types";
+import HumanInterventions from "../../components/HumanInterventions";
 import AutomationDialog from "../../components/AutomationDialog";
 import { useTranslation } from "react-i18next";
 
@@ -46,6 +47,7 @@ const STATUS_ICONS: Record<JobStatus, typeof CheckCircle> = {
   failed: XCircle,
   blocked: Ban,
   in_progress: Loader2,
+  uncertain: XCircle,
 };
 
 const STATUS_STYLES: Record<JobStatus, { color: string; bg: string }> = {
@@ -54,6 +56,7 @@ const STATUS_STYLES: Record<JobStatus, { color: string; bg: string }> = {
   failed: { color: "text-destructive", bg: "bg-[#FFF0F0]" },
   blocked: { color: "text-muted-foreground", bg: "bg-[#F7F7F7]" },
   in_progress: { color: "text-primary", bg: "bg-[#FFF0F3]" },
+  uncertain: { color: "text-destructive", bg: "bg-[#FFF0F0]" },
 };
 
 interface PendingTabProps {
@@ -135,6 +138,7 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
     failed: t("status.failed"),
     blocked: t("status.blocked"),
     in_progress: t("status.inProgress"),
+    uncertain: "Envio incerto — conferir",
   };
 
   const fetchJobs = (isBackgroundRefresh = false) => {
@@ -471,6 +475,7 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
 
   return (
     <div>
+      <HumanInterventions />
       {/* Tailoring Options Panel */}
       <div className="card mb-4">
         <button

@@ -309,6 +309,14 @@ class TestPlugins:
 
 # ── Jobs (CRUD over jobs.json in tmp data dir) ────────────────────────────────
 class TestJobs:
+    def test_uncertain_job_cannot_be_reset_and_resent(self, auth_client):
+        import core.shared_config as config
+        url = "https://jobs.lever.co/acme/uncertain"
+        config.write_jobs({url: {"url": url, "status": "uncertain"}})
+        result = auth_client.put("/jobs/status", json={"url": url, "status": "pending"})
+        assert result.status_code == 409
+        assert config.read_jobs()[url]["status"] == "uncertain"
+
     def test_jobs_empty(self, auth_client):
         """A fresh data dir has no jobs."""
         assert auth_client.get("/jobs").json() == []
@@ -517,6 +525,40 @@ class TestSetup:
 
 # ── Status endpoints for the long-running workers (no work triggered) ─────────
 class TestWorkerStatus:
+    def test_human_confirmation_is_not_an_application_receipt(self, auth_client, data_dir):
+        from backend.core.application_safety import AttemptStore
+        store = AttemptStore(data_dir)
+        attempt = store.begin("https://jobs.lever.co/acme/one")
+        store.transition(attempt, "awaiting_human", "captcha")
+        holds = auth_client.get("/apply/interventions").json()
+        assert holds[0]["id"] == attempt
+        result = auth_client.post(f"/apply/interventions/{attempt}/confirm")
+        assert result.status_code == 200
+        assert store.get(attempt)["state"] == "awaiting_human"
+        assert store.submissions(attempt) == []
+
+    def test_recovery_replays_persisted_confirmation_without_resending(self, auth_client, data_dir):
+        import core.shared_config as config
+        from backend.core.application_safety import AttemptStore
+        url = "https://jobs.lever.co/acme/one"
+        store = AttemptStore(data_dir)
+        attempt = store.begin(url)
+        store.transition(attempt, "confirmed", "independent receipt saved before crash")
+        config.write_jobs({url: {"url": url, "status": "in_progress"}})
+        main._recover_stale_jobs()
+        assert config.read_jobs()[url]["status"] == "applied"
+        assert config.read_jobs()[url]["attempt_id"] == attempt
+
+    def test_recovery_does_not_touch_a_live_held_worker(self, auth_client, data_dir):
+        from filelock import FileLock
+        from backend.core.application_safety import AttemptStore
+        store = AttemptStore(data_dir)
+        attempt = store.begin("https://jobs.lever.co/acme/one")
+        store.transition(attempt, "awaiting_human", "captcha")
+        with FileLock(str(data_dir / "application-worker.lock")):
+            main._recover_stale_jobs()
+        assert store.get(attempt)["state"] == "awaiting_human"
+
     def test_collection_status_idle(self, auth_client):
         body = auth_client.get("/jobs/collect/status").json()
         assert body["running"] is False

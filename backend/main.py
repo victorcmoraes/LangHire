@@ -43,8 +43,7 @@ async def lifespan(app: FastAPI):
     data_dir.mkdir(parents=True, exist_ok=True)
     _log.info(f"Data directory: {data_dir}")
     _log.info(f"Token prefix: {_API_TOKEN[:8]}...")
-    # Clean up orphaned browser processes from previous crash
-    _kill_browser_processes()
+    # Never close a live CLI worker or a CAPTCHA held in another process.
     # Reset any jobs stuck in "in_progress" from a previous crash
     _recover_stale_jobs()
     # Clean up old run logs (>30 days)
@@ -85,6 +84,7 @@ logging.basicConfig(
             get_data_dir() / "backend.log",
             maxBytes=5 * 1024 * 1024,
             backupCount=3,
+            encoding="utf-8",
         ),
         logging.StreamHandler(),
     ],
@@ -209,20 +209,30 @@ def _start_parent_watchdog():
 
 
 def _recover_stale_jobs():
-    """Reset jobs stuck in 'in_progress' back to 'pending' (crash recovery)."""
+    """Reconcile durable receipts, never silently retry an interrupted send."""
+    from filelock import FileLock, Timeout
+    from backend.core.application_safety import AttemptStore
     try:
         from core.shared_config import read_jobs, write_jobs
     except ImportError:
         from backend.core.shared_config import read_jobs, write_jobs
-    jobs = read_jobs()
-    recovered = 0
-    for url, job in jobs.items():
-        if job.get("status") == "in_progress":
-            job["status"] = "pending"
-            recovered += 1
-    if recovered:
-        write_jobs(jobs)
-        _log.info(f"Recovered {recovered} stale in_progress jobs back to pending")
+    lease = FileLock(str(get_data_dir() / "application-worker.lock"), timeout=0)
+    try:
+        with lease:
+            store = AttemptStore(get_data_dir())
+            store.recover()
+            attempts = {row["job_url"]: row for row in reversed(store.list())}
+            jobs = read_jobs()
+            for url, job in jobs.items():
+                attempt = attempts.get(url)
+                if attempt and attempt["state"] == "confirmed":
+                    job.update(status="applied", applied_at=job.get("applied_at") or attempt["updated_at"],
+                               attempt_id=attempt["id"], evidence_dir=attempt["evidence_dir"], error=None)
+                elif job.get("status") in ("in_progress", "awaiting_human") or (attempt and attempt["state"] == "uncertain"):
+                    job.update(status="uncertain", error="Interrupted attempt requires reconciliation; no automatic resend")
+            write_jobs(jobs)
+    except Timeout:
+        _log.info("Live application worker owns the profile; no recovery performed")
 
 
 def _api_error(code: str, message: str, status_code: int = 400) -> JSONResponse:
@@ -246,7 +256,7 @@ def _get_jobs_file() -> Path:
 def _load_jobs() -> dict:
     path = _get_jobs_file()
     if path.exists():
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     return {}
 
 
@@ -690,16 +700,27 @@ def _run_async_in_thread(coro_factory, status_dict):
 
 
 def _kill_browser_processes():
+    from filelock import FileLock, Timeout
+    try:
+        with FileLock(str(get_data_dir() / "application-worker.lock"), timeout=0):
+            _kill_owned_browser_processes()
+    except Timeout:
+        _log.info("Application profile is leased; leaving its browser open")
+
+
+def _kill_owned_browser_processes():
     """Kill any Chromium processes using the shared browser profile.
     Uses psutil for cross-platform support (macOS, Linux, Windows)."""
     try:
         import psutil
-        target = "langhire/browser_profile"
+        target = str(get_data_dir() / "browser_profile").replace("\\", "/").lower()
         procs_to_kill = []
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 cmdline = proc.info.get("cmdline") or []
-                if any(target in arg for arg in cmdline):
+                profile_args = [arg.split("=", 1)[1].strip('"').replace("\\", "/").lower().rstrip("/")
+                                for arg in cmdline if arg.startswith("--user-data-dir=")]
+                if target.rstrip("/") in profile_args:
                     procs_to_kill.append(proc)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
@@ -716,24 +737,7 @@ def _kill_browser_processes():
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 pass
     except ImportError:
-        import subprocess
-        try:
-            if sys.platform == "win32":
-                subprocess.run(
-                    ["taskkill", "/F", "/FI", "IMAGENAME eq chrome.exe"],
-                    timeout=5, capture_output=True,
-                )
-                subprocess.run(
-                    ["taskkill", "/F", "/FI", "IMAGENAME eq chromium.exe"],
-                    timeout=5, capture_output=True,
-                )
-            else:
-                subprocess.run(
-                    ["pkill", "-f", "user-data-dir=.*langhire/browser_profile"],
-                    timeout=3, capture_output=True,
-                )
-        except Exception:
-            pass
+        _log.warning("psutil unavailable: skipping cleanup; never killing unrelated Chrome sessions")
 
 
 def _force_stop(status_dict):
@@ -769,8 +773,8 @@ async def start_collection(body: CollectRequest):
     if _collection_status["running"]:
         return {"success": False, "message": "Collection already running"}
 
-    # Kill any leftover browser processes from previous runs
-    _kill_browser_processes()
+    if _apply_status.get("running"):
+        return _api_error("profile_busy", "An application or human hold is using the profile", 409)
 
     title = body.title
     max_jobs = body.max_jobs
@@ -851,7 +855,11 @@ async def start_collection(body: CollectRequest):
         print(f"\nCollection complete! Total: {len(jobs)} (Easy Apply: {easy}), Pending: {pending}, With descriptions: {descs}")
 
     def make_coro():
-        return _do_collect()
+        async def leased_collection():
+            from filelock import FileLock
+            with FileLock(str(get_data_dir() / "application-worker.lock"), timeout=0):
+                await _do_collect()
+        return leased_collection()
 
     _collection_thread = _run_async_in_thread(make_coro, _collection_status)
     return {"success": True, "message": f"Collection started for {title or 'all titles'}"}
@@ -891,8 +899,13 @@ async def start_applying(body: ApplyRequest):
     if _apply_status["running"]:
         return {"success": False, "message": "Application already running"}
 
-    # Kill any leftover browser processes from previous runs
-    _kill_browser_processes()
+    if load_settings().get("submission_enabled") is False:
+        return _api_error("pilot_not_ready", "Real submissions await model and pilot validation in this fork", 409)
+
+    if body.workers != 1:
+        return _api_error("profile_exclusive", "Use one worker per browser profile", 400)
+    if _collection_status.get("running"):
+        return _api_error("profile_busy", "Collection is using the browser profile", 409)
 
     workers = body.workers
     mode = body.mode
@@ -1026,6 +1039,22 @@ async def apply_status():
 
 
 # ── Jobs ──────────────────────────────────────────────────────────────────
+@app.get("/apply/interventions")
+async def application_interventions():
+    from backend.core.application_safety import AttemptStore
+    return AttemptStore(get_data_dir()).list("awaiting_human")
+
+
+@app.post("/apply/interventions/{attempt_id}/confirm")
+async def confirm_application_intervention(attempt_id: str):
+    from backend.core.application_safety import AttemptStore, SafetyError
+    try:
+        AttemptStore(get_data_dir()).acknowledge(attempt_id)
+    except SafetyError as error:
+        return _api_error("invalid_intervention", str(error), 409)
+    return {"success": True, "message": "Acknowledged; checking existing attempt without submitting"}
+
+
 @app.get("/jobs")
 async def get_jobs(
     status: Optional[str] = Query(None),
@@ -1053,7 +1082,7 @@ async def get_jobs(
 @app.get("/jobs/stats")
 async def get_job_stats():
     jobs = _load_jobs()
-    stats = {"total": len(jobs), "pending": 0, "applied": 0, "failed": 0, "blocked": 0, "in_progress": 0}
+    stats = {"total": len(jobs), "pending": 0, "applied": 0, "failed": 0, "blocked": 0, "in_progress": 0, "uncertain": 0}
     for j in jobs.values():
         s = j.get("status", "pending")
         if s in stats:
@@ -1112,6 +1141,9 @@ async def update_job_status(body: dict):
     jobs = _load_jobs()
     if url not in jobs:
         return _api_error("not_found", "Job not found", 404)
+
+    if jobs[url].get("status") in ("in_progress", "awaiting_human", "uncertain", "applied"):
+        return _api_error("reconciliation_required", "Reconcile existing attempt before changing its status", 409)
 
     from core.shared_config import update_job
     update_job(url, status=new_status, error=None)
@@ -1259,6 +1291,14 @@ async def auth_login(service: str):
     profile_dir = _get_browser_profile_dir()
 
     def _run_login_browser():
+        from filelock import FileLock, Timeout
+        try:
+            with FileLock(str(get_data_dir() / "application-worker.lock"), timeout=0):
+                _run_login_browser_unleased()
+        except Timeout:
+            _log.warning("Browser profile busy; login will not interrupt the existing session")
+
+    def _run_login_browser_unleased():
         """Run Playwright persistent context in a thread (blocks until browser closes)."""
         global _login_running
         _login_running = True

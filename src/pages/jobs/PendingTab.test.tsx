@@ -44,6 +44,8 @@ vi.mock("../../lib/perf", () => ({
 }));
 
 vi.mock("../../lib/api", () => ({
+  getInterventions: vi.fn().mockResolvedValue([]),
+  confirmIntervention: vi.fn(),
   getJobs: vi.fn(),
   startApplying: vi.fn(),
   getApplyStatus: vi.fn(),

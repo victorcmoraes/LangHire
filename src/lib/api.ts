@@ -3,6 +3,7 @@
  * The backend runs as a local FastAPI server on a dynamic port.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { HumanIntervention } from "./types";
 import type {
   CandidateProfile,
   LLMSettings,
@@ -24,6 +25,10 @@ import type {
 } from "./types";
 
 const DEFAULT_PORT = 8743;
+
+export const getInterventions = () => request<HumanIntervention[]>("/apply/interventions");
+export const confirmIntervention = (id: string) =>
+  request<{ success: boolean }>(`/apply/interventions/${encodeURIComponent(id)}/confirm`, { method: "POST" });
 
 let backendPort = DEFAULT_PORT;
 let tokenPromise: Promise<string> | null = null;
