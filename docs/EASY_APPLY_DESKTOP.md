@@ -48,6 +48,13 @@ aparecer no app. As duas chamadas entram na contagem de uso do modelo.
 Mudanças nos arquivos usados invalidam respostas derivadas. A confirmação humana
 continua necessária; a descrição gerada no inventário não é tratada como fato.
 
+No teste real da pergunta sobre pesquisa/POCs, o 8b gerou texto e referências
+válidas, mas também acrescentou comparações e resultados que os arquivos não
+comprovavam, inclusive após a revisão pelo próprio modelo. O rascunho dessa
+pergunta foi corrigido editorialmente e permanece sem aprovação do candidato.
+Portanto, a revisão local não comprova a veracidade de toda a narrativa e não
+libera aprovação autônoma de respostas abertas.
+
 ## Implementação e evidências
 
 - Estados do executor: abrir vaga/modal, identificar etapa, resolver/preencher, conferir, avançar, revisar e enviar uma vez.
