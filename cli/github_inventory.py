@@ -69,8 +69,11 @@ def analyze(repo, root, model):
         return (0 if p in ('readme.md','readme.rst','readme.txt') else
                 1 if p.endswith(('pyproject.toml','package.json','pom.xml','requirements.txt','cargo.toml','go.mod')) else
                 2 if p.endswith(('.py','.ts','.tsx','.java','.go','.rs','.sql')) else 9,len(p),p)
-    files=sorted(files,key=priority)
-    files=[x for x in files if priority(x)[0]<9][:4]
+    candidates=sorted(files,key=priority)
+    files=[x for x in candidates if priority(x)[0]<9][:4]
+    if not files:
+        # Extend only previously empty selections; existing cached evidence stays unchanged.
+        files=[x for x in candidates if x['path'].lower().endswith(('.js','.jsx','.cs','.cpp','.c','.h','.html'))][:4]
     evidence=[];remaining=8000
     for item in files:
         blob=gh(f'repos/{name}/git/blobs/{item["sha"]}')
