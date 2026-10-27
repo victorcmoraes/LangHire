@@ -361,20 +361,19 @@ class SubmissionMonitor:
                     if not is_portal(frame.url):
                         continue
                     try:
-                        text = await frame.locator("body").inner_text(timeout=2000)
-                        challenge = False
-                        for element in await frame.locator(
-                            'iframe[src*="hcaptcha"], iframe[src*="recaptcha"], [data-captcha-challenge]'
-                        ).all():
-                            if not await element.is_visible():
-                                continue
-                            opaque = await element.evaluate("e=>{for(let n=e;n;n=n.parentElement){if(getComputedStyle(n).opacity==='0')return false;}return true;}")
-                            if not opaque:
-                                continue
-                            box = await element.bounding_box()
-                            if box and box["height"] > 150 and box["width"] > 150:
-                                challenge = True
-                        views.append({"url": clean_url(frame.url), "text": text[:50000], "challenge": challenge})
+                        # Read text and challenge visibility atomically. The portal
+                        # can remove the iframe as CAPTCHA finishes; resolving an
+                        # old Locator again would otherwise wait for it to reappear.
+                        snapshot = await frame.locator('body').evaluate('''body=>({
+                            text:body.innerText.slice(0,50000),
+                            challenge:[...body.querySelectorAll('iframe[src*="hcaptcha"], iframe[src*="recaptcha"], [data-captcha-challenge]')].some(e=>{
+                                const style=getComputedStyle(e),box=e.getBoundingClientRect();
+                                if(style.visibility==='hidden'||style.visibility==='collapse'||box.height<=150||box.width<=150)return false;
+                                for(let n=e;n;n=n.parentElement){if(getComputedStyle(n).opacity==='0')return false;}
+                                return true;
+                            })
+                        })''',timeout=2000)
+                        views.append({"url": clean_url(frame.url), **snapshot})
                     except Exception as error:
                         self.store.event(self.attempt_id, "capture_error",
                                          {"stage": "observe", "error": str(error)[:300]})
@@ -401,6 +400,49 @@ class SubmissionMonitor:
         self.store.transition(self.attempt_id, state, message)
         self.terminal = True
 
+    def observed_outcome(self, views):
+        sends = self.store.submissions(self.attempt_id)
+        if not sends:
+            return None
+        if any(ERROR.search(view['text']) for view in views):
+            return 'uncertain', 'Portal reported a submission/verification error; do not resend'
+        if any(row['http_status'] == 422 and row['request_key'] in self.rejected_responses for row in sends):
+            return 'rejected', 'Portal explicitly rejected the payload with HTTP 422 and validation errors; evidence retained'
+        accepted = any(row['http_status'] and 200 <= row['http_status'] < 300
+                       and row['request_key'] not in self.rejected_responses for row in sends)
+        expected_url = self.store.get(self.attempt_id)['job_url']
+        if accepted and any(SUCCESS.search(view['text']) and confirmation_matches_job(expected_url, view['url'])
+                            for view in views):
+            return 'confirmed', 'Successful submit response AND portal confirmation'
+        return None
+
+    async def wait_for_intervention(self, message):
+        """Keep observing the SAME attempt while the human works on the challenge."""
+        waiting = asyncio.create_task(self.store.wait_for_human(self.attempt_id, message, self.cancel))
+        try:
+            while not waiting.done():
+                views = await self.observe()
+                outcome = self.observed_outcome(views)
+                if outcome:
+                    waiting.cancel()
+                    try:
+                        await waiting
+                    except asyncio.CancelledError:
+                        pass
+                    self.store.event(self.attempt_id, 'human_hold_portal_result', {'state': outcome[0]})
+                    await self.finish(*outcome)
+                    return views
+                await asyncio.sleep(0.5)
+            await waiting
+            return await self.observe()
+        finally:
+            if not waiting.done():
+                waiting.cancel()
+                try:
+                    await waiting
+                except asyncio.CancelledError:
+                    pass
+
     async def guard(self, agent=None):
         if self.terminal:
             if agent:
@@ -412,16 +454,21 @@ class SubmissionMonitor:
                 agent.stop()
             return
         views = await self.observe()
+        outcome = self.observed_outcome(views)
+        if outcome:
+            await self.finish(*outcome)
+            if agent:
+                agent.stop()
+            return
         if any(view["challenge"] for view in views):
             await self.capture("human-hold")
-            await self.store.wait_for_human(
-                self.attempt_id, "Resolva o CAPTCHA da candidatura aberta", self.cancel)
-            # Re-read the portal; acknowledgement never proves success or causes a click.
-            views = await self.observe()
-            while any(view["challenge"] for view in views):
-                await self.store.wait_for_human(
-                    self.attempt_id, "O desafio ainda está visível. Resolva e confirme novamente", self.cancel)
-                views = await self.observe()
+            views = await self.wait_for_intervention("Resolva o CAPTCHA da candidatura aberta")
+            while not self.terminal and any(view["challenge"] for view in views):
+                views = await self.wait_for_intervention("O desafio ainda está visível. Resolva e confirme novamente")
+            if self.terminal:
+                if agent:
+                    agent.stop()
+                return
         sends = self.store.submissions(self.attempt_id)
         if sends:
             # Once any send was attempted, the model never receives another action.
@@ -429,24 +476,12 @@ class SubmissionMonitor:
                 if self.cancel and self.cancel.get("cancel_requested"):
                     raise asyncio.CancelledError()
                 views = await self.observe()
+                outcome = self.observed_outcome(views)
+                if outcome:
+                    await self.finish(*outcome)
+                    break
                 if any(view["challenge"] for view in views):
                     return await self.guard(agent)
-                errors = [ERROR.search(view["text"]) for view in views]
-                if any(errors):
-                    await self.finish("uncertain", "Portal reported a submission/verification error; do not resend")
-                    break
-                sends = self.store.submissions(self.attempt_id)
-                if any(row['http_status']==422 and row['request_key'] in self.rejected_responses for row in sends):
-                    await self.finish('rejected','Portal explicitly rejected the payload with HTTP 422 and validation errors; evidence retained')
-                    break
-                accepted = any(row["http_status"] and 200 <= row["http_status"] < 300 and
-                               row["request_key"] not in self.rejected_responses for row in sends)
-                expected_url=self.store.get(self.attempt_id)['job_url']
-                confirmations=[view for view in views if SUCCESS.search(view['text'])
-                               and confirmation_matches_job(expected_url,view['url'])]
-                if accepted and confirmations:
-                    await self.finish("confirmed", "Successful submit response AND portal confirmation")
-                    break
                 await asyncio.sleep(0.5)
             if not self.terminal:
                 await self.finish("uncertain", "Send attempted without independent portal confirmation")

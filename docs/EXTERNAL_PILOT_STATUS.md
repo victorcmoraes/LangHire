@@ -24,10 +24,22 @@ deprecation warning.
 
 The local deterministic Lever executor also prepared and reviewed a fresh real
 form. An initial preparation exceeded its resume-parser wait without making a
-send intent. A later preparation reached a human CAPTCHA and remains on that
-same open attempt. Reaching the challenge is not a confirmed submission or a
-completed real-world validation of the transport change. Human acknowledgement
-only triggers observation; it does not cause another submit click.
+send intent. A later preparation reached a human CAPTCHA. After intervention,
+the native document POST reached the portal, which returned HTTP 400 and an
+explicit application-verification error. Unlike the earlier client-side block,
+this attempt has a recorded portal response. It remains uncertain and protected
+against repetition. No external submission is confirmed. Further Lever sends
+are paused for diagnosis; this is not evidence of an account restriction.
+
+The monitor now continues observing while waiting for human intervention. A
+portal verification error or a valid same-job confirmation ends that hold
+without requiring a chat/terminal acknowledgement or causing another click.
+Text and CAPTCHA visibility are read together, avoiding a stale iframe locator
+waiting for a challenge that has already disappeared. Fixtures cover both
+automatic outcomes while retaining one send intent.
+
+After this follow-up, all 46 targeted monitor, durable-attempt and hosted-form
+tests passed, including platform-pause isolation and the new human-hold cases.
 
 Detailed job identities, attempts, screenshots and the live checkpoint are kept
 in ignored `.local/`. The external executor and catalog are still development

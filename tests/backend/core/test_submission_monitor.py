@@ -101,6 +101,29 @@ async def test_captcha_wait_then_same_attempt_result(fixture_portal, message, ex
     assert len(store.submissions(attempt)) == 1
 
 
+@pytest.mark.parametrize('status,message,expected',[
+    (400,'There was an error verifying your application. Please try again.','uncertain'),
+    (200,'We have received your application','confirmed'),
+])
+async def test_captcha_result_observed_without_human_ack_or_second_click(fixture_portal,status,message,expected):
+    page,data,store,aid,monitor=fixture_portal
+    data['challenge']=True;data['status']=status
+    await click_submit(page,monitor)
+    checking=asyncio.create_task(monitor.finalize())
+    for _ in range(100):
+        if store.get(aid)['state']=='awaiting_human':break
+        await asyncio.sleep(.01)
+    assert store.get(aid)['state']=='awaiting_human'
+    # Some hosted forms leave the challenge iframe visible after their result.
+    # A definitive portal error/receipt should end the hold without acknowledgement.
+    await page.set_content('<div data-captcha-challenge style="width:300px;height:200px">Challenge</div><p>'+message+'</p>')
+    assert (await asyncio.wait_for(checking,5))['state']==expected
+    assert store.get(aid)['acknowledged']==0
+    assert data['received']==1 and len(store.submissions(aid))==1
+    with store.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='human_hold_portal_result'",(aid,)).fetchone()[0]==1
+
+
 async def test_verification_error_overrides_success_text(fixture_portal):
     page, data, store, attempt, monitor = fixture_portal
     await click_submit(page, monitor)

@@ -22,3 +22,11 @@ def test_location_enrichment_does_not_invalidate_correct_accepted_address():
     address['address']['country']['code'] = 'US'
     assert not accepted_brazil_location(json.dumps(address), 'Olinda', 'Pernambuco')
     assert not accepted_brazil_location('', 'Olinda', 'Pernambuco')
+
+
+def test_current_native_place_id_and_exact_display_location_are_accepted_without_enrichment():
+    token={'name':'Olinda, Pernambuco, BRA','id':'native-selected-place'}
+    assert accepted_brazil_location(json.dumps(token),'Olinda','Pernambuco')
+    assert not accepted_brazil_location(json.dumps(dict(token,id='')),'Olinda','Pernambuco')
+    assert not accepted_brazil_location(json.dumps(dict(token,name='Olinda, HI, USA')),'Olinda','Pernambuco')
+    assert not accepted_brazil_location(json.dumps(dict(token,name='New Olinda, Pernambuco, BRA')),'Olinda','Pernambuco')
