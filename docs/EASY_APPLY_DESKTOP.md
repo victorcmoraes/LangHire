@@ -25,6 +25,21 @@ perguntas ou novas vagas. Se faltarem fatos para o 8b propor uma resposta, o app
 informa isso e mantém a pergunta pendente para preenchimento manual. Uma proposta
 com referências ou formato inválidos também permanece sem uso.
 
+## Catálogo de projetos do GitHub
+
+Com GitHub CLI autenticado e Ollama local, execute
+`.venv\Scripts\python.exe -m cli.github_inventory`. O comando consulta os
+repositórios pertencentes à conta, lê documentação, manifests e amostras de
+código e pede ao Qwen3 8b uma descrição com referências aos arquivos e ao commit.
+Use `--limit N` para um teste pequeno. Resultados e contagens de tokens ficam em
+`.local/github/`; o cache considera commit, modelo e versão do analisador.
+Repositórios privados continuam locais. Arquivos de credenciais e diretórios
+gerados são excluídos da seleção. A leitura é limitada a quatro arquivos e
+8 mil caracteres por repositório, portanto não é uma auditoria completa.
+O catálogo contém propostas: código existente não comprova autoria individual,
+uso profissional, métricas ou decisões de POC. Essas afirmações não são
+importadas automaticamente como respostas confirmadas para candidaturas.
+
 ## Implementação e evidências
 
 - Estados do executor: abrir vaga/modal, identificar etapa, resolver/preencher, conferir, avançar, revisar e enviar uma vez.
