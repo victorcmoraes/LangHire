@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from playwright.async_api import async_playwright
 from core.application_safety import AttemptStore
-from core.submission_monitor import SubmissionMonitor, is_submission, clean_url
+from core.submission_monitor import SubmissionMonitor, is_submission, clean_url, same_lever_redirect, confirmation_matches_job
 
 
 @pytest.fixture
@@ -152,7 +152,7 @@ async def test_resume_upload_and_new_confirmation_tab(fixture_portal):
     assert b"%PDF-test-resume" in data["body"]
     await page.set_content("Processing")
     receipt = await page.context.new_page()
-    await receipt.goto("https://jobs.lever.co/acme/job/receipt")
+    await receipt.goto("https://jobs.lever.co/acme/job/thanks")
     await receipt.set_content("We have received your application")
     assert (await monitor.finalize())["state"] == "confirmed"
     assert data["received"] == 1
@@ -160,6 +160,10 @@ async def test_resume_upload_and_new_confirmation_tab(fixture_portal):
 
 async def test_embedded_ats_form_is_observed_across_frames(fixture_portal):
     page, data, store, attempt, monitor = fixture_portal
+    # The containing company page and hosted form represent the same GH job.
+    with store.db() as db:
+        db.execute('UPDATE attempts SET job_url=? WHERE id=?',
+                   ('https://job-boards.greenhouse.io/acme/jobs/123',attempt))
     await page.set_content('<iframe src="https://job-boards.greenhouse.io/acme/jobs/123"></iframe>')
     frame = page.frame_locator("iframe")
     await frame.get_by_role("button", name="Submit application").click()
@@ -270,3 +274,79 @@ async def test_observed_native_verification_is_forwarded_unchanged_without_an_ap
     assert monitor.blocked_request is None
     assert data['body']==b'native-browser-verification'
     assert store.submissions(aid)==[]
+
+
+def test_lever_redirect_and_confirmation_are_bound_to_same_origin_and_job():
+    job='https://jobs.lever.co/acme/job'
+    assert same_lever_redirect(job+'/apply',job+'/thanks')
+    assert same_lever_redirect(job+'/apply',job+'/apply?transport=next')
+    for other in ('https://jobs.lever.co/acme/other/thanks',
+                  'https://jobs.eu.lever.co/acme/job/thanks',
+                  'https://jobs.lever.co:8443/acme/job/thanks',
+                  'https://jobs.lever.co/acme/job/thanks/extra',
+                  'http://jobs.lever.co/acme/job/thanks'):
+        assert not same_lever_redirect(job+'/apply',other)
+        assert not confirmation_matches_job(job,other)
+    assert confirmation_matches_job(job,job+'/thanks?receipt=ignored')
+
+
+async def test_other_lever_job_success_does_not_confirm_our_send(fixture_portal,monkeypatch):
+    page,data,store,aid,monitor=fixture_portal
+    await click_submit(page,monitor)
+    async def other_job_view():
+        return [{'url':'https://jobs.lever.co/acme/other/thanks','text':'Thank you for applying','challenge':False}]
+    async def no_wait(_):pass
+    monitor.observe=other_job_view
+    monkeypatch.setattr('core.submission_monitor.asyncio.sleep',no_wait)
+    assert (await monitor.finalize())['state']=='uncertain'
+    assert data['received']==1
+    assert len(store.submissions(aid))==1
+
+
+@pytest.mark.parametrize('redirect_status',[307,308])
+async def test_native_document_post_redirect_is_same_intent_and_reaches_own_receipt(tmp_path,monkeypatch,redirect_status):
+    # Redirects bypass subsequent Playwright routes: exercise a real local HTTP
+    # server rather than let a mocked redirect escape to an actual ATS hostname.
+    from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+    from threading import Thread
+    import core.submission_monitor as module
+    posts=[]
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self,*args):pass
+        def do_POST(self):
+            posts.append(self.rfile.read(int(self.headers['Content-Length'])))
+            self.send_response(redirect_status if '?transport=next' not in self.path else 302)
+            self.send_header('Location',base+('/apply?transport=next' if '?transport=next' not in self.path else '/thanks'))
+            self.send_header('Content-Length','0');self.end_headers()
+        def do_GET(self):
+            body=(b'Thank you for applying' if self.path.endswith('/thanks') else
+                  b'<form method="POST"><input name="email" value="test@example.invalid"><button>Submit application</button></form>')
+            self.send_response(200);self.send_header('Content-Type','text/html');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+    server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    origin='http://127.0.0.1:'+str(server.server_port);base=origin+'/fixture/00000000-0000-0000-0000-000000000001'
+    thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+    real_redirect=module.same_lever_redirect
+    monkeypatch.setattr(module,'is_portal',lambda url:url.startswith(origin+'/'))
+    monkeypatch.setattr(module,'same_lever_redirect',lambda a,b:real_redirect(a.replace(origin,'https://jobs.lever.co'),b.replace(origin,'https://jobs.lever.co')))
+    try:
+        async with async_playwright() as p:
+            browser=await p.chromium.launch(channel='chrome',headless=True);context=await browser.new_context()
+            store=AttemptStore(tmp_path);aid=store.begin(base);monitor=SubmissionMonitor(store,aid);await monitor.attach_context(context)
+            page=await context.new_page();await page.goto(base+'/apply')
+            capture=monitor.capture
+            async def capture_after_navigation(stage):
+                if stage in ('before-submit','submit-dispatched'):
+                    # A screenshot may await navigation. It must never hold the
+                    # intercepted document POST that is needed for that navigation.
+                    await page.get_by_text('Thank you for applying',exact=True).wait_for(timeout=3000)
+                return await capture(stage)
+            monitor.capture=capture_after_navigation
+            monitor.arm_submission(base+'/apply')
+            await page.get_by_role('button',name='Submit application').click()
+            await page.get_by_text('Thank you for applying',exact=True).wait_for()
+            if monitor.response_tasks:await asyncio.gather(*list(monitor.response_tasks))
+            assert len(posts)==2 and posts[0]==posts[1]
+            assert len(store.submissions(aid))==1
+            assert (await monitor.finalize())['state']=='confirmed'
+            await monitor.close();await browser.close()
+    finally:server.shutdown();server.server_close();thread.join(timeout=1)

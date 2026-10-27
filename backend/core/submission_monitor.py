@@ -5,6 +5,7 @@ bodies, cookies, query strings or CAPTCHA tokens. Unsupported paths cannot be
 promoted to confirmed by model output.
 """
 import asyncio
+import hashlib
 import json
 import re
 import uuid
@@ -28,6 +29,27 @@ def clean_url(url):
     if path.startswith("/cdn-cgi/challenge-platform/"):
         path = "/cdn-cgi/challenge-platform/[session-path-redacted]"
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+
+
+def same_lever_redirect(source,target):
+    a,b=urlsplit(source),urlsplit(target)
+    base=a.path.rstrip('/').removesuffix('/apply')
+    return (a.scheme==b.scheme=='https' and a.hostname==b.hostname and (a.port or 443)==(b.port or 443)
+            and a.hostname in ('jobs.lever.co','jobs.eu.lever.co')
+            and b.path.rstrip('/') in (base+'/apply',base+'/thanks'))
+
+
+def confirmation_matches_job(job_url, view_url):
+    expected, observed = urlsplit(job_url), urlsplit(view_url)
+    if expected.hostname in ('linkedin.com', 'www.linkedin.com'):
+        return job_key(job_url) == job_key(view_url)
+    if expected.hostname in ('jobs.lever.co', 'jobs.eu.lever.co'):
+        base = expected.path.rstrip('/').removesuffix('/apply')
+        return (expected.scheme == observed.scheme == 'https'
+                and expected.hostname == observed.hostname
+                and (expected.port or 443) == (observed.port or 443)
+                and observed.path.rstrip('/') in (base, base + '/apply', base + '/thanks'))
+    return True
 
 
 def is_portal(url):
@@ -173,6 +195,7 @@ class SubmissionMonitor:
         self.rejected_responses = set()
         self.armed_request_key = None
         self.upload_receipts = []
+        self.response_statuses = {}
 
     def arm_submission(self, url):
         """Count and persist the operator's final submit intent BEFORE the click."""
@@ -200,7 +223,11 @@ class SubmissionMonitor:
     async def route(self, route):
         request = route.request
         if is_submission(request.url, request.method, request.post_data_buffer):
-            key = self.armed_request_key if self.armed_request_key and not self.requests else uuid.uuid4().hex
+            previous=request.redirected_from
+            continuation=(previous in self.requests and self.response_statuses.get(previous) in (307,308)
+                          and previous.method=='POST' and same_lever_redirect(previous.url,request.url)
+                          and previous.post_data_buffer==request.post_data_buffer)
+            key = self.requests[previous] if continuation else self.armed_request_key if self.armed_request_key and not self.requests else uuid.uuid4().hex
             try:
                 payload=request_json(request.post_data_buffer)
                 linkedin_job=linkedin_submit_job_id(payload)
@@ -217,11 +244,20 @@ class SubmissionMonitor:
                         raise SafetyError("Pre-submit review blocked the request: " + review.get("reason", "unresolved fields"))
                 self.store.intent(self.attempt_id, key, clean_url(request.url), self.daily_limit)
                 self.requests[request] = key
-                await self.capture("before-submit")
+                self.store.event(self.attempt_id,'submit_transport',{'url':clean_url(request.url),'resource_type':request.resource_type,
+                    'redirect_continuation':continuation,'body_sha256':hashlib.sha256(request.post_data_buffer or b'').hexdigest()})
             except Exception as error:
-                self.store.event(self.attempt_id, "request_blocked", {"reason": str(error)})
+                self.store.event(self.attempt_id, "request_blocked", {"reason": str(error),'url':clean_url(request.url),
+                    'resource_type':request.resource_type,'redirected_from':clean_url(previous.url) if previous else None})
                 await route.abort("blockedbyclient")
                 return
+            # A document POST must not be held while screenshot waits for navigation.
+            # Adapters persist the complete review before arming the click; final evidence
+            # is still awaited before updating durable confirmation/history.
+            await route.fallback()
+            task=asyncio.create_task(self.capture_after_dispatch())
+            self.response_tasks.add(task);task.add_done_callback(self.response_tasks.discard)
+            return
         elif request.method.upper() == "POST":
             # Unknown mutations are not allowed to slip past the durable send gate.
             # Expand this list only with endpoint-specific fixtures/evidence.
@@ -269,6 +305,15 @@ class SubmissionMonitor:
         await route.fallback()
 
     def on_response(self, response):
+        self.response_statuses[response.request]=response.status
+        previous=response.request.redirected_from
+        continuation=(previous in self.requests and same_lever_redirect(previous.url,response.url)
+                      and (response.request.method=='GET' or (response.request.method=='POST'
+                           and self.response_statuses.get(previous) in (307,308)
+                           and previous.post_data_buffer==response.request.post_data_buffer)))
+        if response.request not in self.requests and continuation:
+            self.requests[response.request]=self.requests[previous]
+            self.store.event(self.attempt_id,'submit_redirect_receipt',{'url':clean_url(response.url),'status':response.status})
         path=urlsplit(response.url).path.rstrip('/').lower()
         host=urlsplit(response.url).hostname
         if host in ('linkedin.com','www.linkedin.com') and response.request.method=='POST':
@@ -282,6 +327,10 @@ class SubmissionMonitor:
             task = asyncio.create_task(self.record_response(response))
             self.response_tasks.add(task)
             task.add_done_callback(self.response_tasks.discard)
+
+    async def capture_after_dispatch(self):
+        try:await self.capture('submit-dispatched')
+        except Exception as error:self.store.event(self.attempt_id,'capture_error',{'stage':'submit-dispatched','error':str(error)[:300]})
 
     async def record_response(self, response):
         try:
@@ -392,9 +441,9 @@ class SubmissionMonitor:
                     break
                 accepted = any(row["http_status"] and 200 <= row["http_status"] < 300 and
                                row["request_key"] not in self.rejected_responses for row in sends)
-                expected=job_key(self.store.get(self.attempt_id)['job_url'])
+                expected_url=self.store.get(self.attempt_id)['job_url']
                 confirmations=[view for view in views if SUCCESS.search(view['text'])
-                               and (not expected.startswith('linkedin:') or job_key(view['url'])==expected)]
+                               and confirmation_matches_job(expected_url,view['url'])]
                 if accepted and confirmations:
                     await self.finish("confirmed", "Successful submit response AND portal confirmation")
                     break
