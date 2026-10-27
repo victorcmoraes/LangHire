@@ -11,7 +11,7 @@ import uuid
 import zlib
 from urllib.parse import urlsplit, urlunsplit, parse_qs
 
-from .application_safety import ACTIVE, AttemptStore, SafetyError
+from .application_safety import ACTIVE, AttemptStore, SafetyError, job_key
 
 SUCCESS = re.compile(
     r"application (?:has been |was )?(?:successfully )?submitted|"
@@ -36,12 +36,12 @@ def is_portal(url):
                for suffix in ("lever.co", "greenhouse.io", "linkedin.com"))
 
 
-def is_submission(url, method):
+def is_submission(url, method, body=None):
     if method.upper() != "POST" or not is_portal(url):
         return False
     path = urlsplit(url).path.lower()
     if (urlsplit(url).hostname or '').endswith('linkedin.com'):
-        return linkedin_request_kind(url, method) == 'submit'
+        return linkedin_request_kind(url, method, body) == 'submit'
     return bool(re.search(r"/(?:apply|applications?|jobapplications|easyapply)$|"
                           r"/boards/[^/]+/jobs/[^/]+$|/jobs/[^/]+/apply$|"
                           r"voyagerjobs.*(?:onsiteapply|jobapplications)|jobs(?:onsiteapply|apply)", path))
@@ -101,6 +101,7 @@ def linkedin_request_kind(url, method, body=None):
             'manageJobBanner','premiumApplicantInsightsForJobDetails','resumeReview','similarJobs','uploadedDocument')}
         if payload.get('componentId') in allowed:return 'read'
     if path=='/flagship-web/rsc-action/actions/server-request' and isinstance(payload,dict):
+        if linkedin_submit_job_id(payload) is not None:return 'submit'
         if payload.get('requestId') in ('com.linkedin.sdui.requests.jobseeker.easyapply.handlePickedFile',
                                         'com.linkedin.sdui.requests.jobseeker.easyapply.getAmbryUploadUrl'):return 'upload'
         if payload.get('requestId')=='com.linkedin.sdui.requests.jobseeker.easyapply.setResumeFormBinding':return 'draft'
@@ -130,6 +131,27 @@ def linkedin_request_kind(url, method, body=None):
     if path in ('/voyager/api/jobs/onsiteapplydrafts','/voyager/api/voyagerjobsdashonsiteapplydrafts'):
         return 'draft'
     return 'unsupported'
+
+
+def linkedin_submit_job_id(payload):
+    """Recognize only the final operation and duplicated job identity observed in the pilot."""
+    operation='com.linkedin.sdui.requests.jobseeker.easyapply.submit'
+    if not isinstance(payload,dict) or payload.get('requestId')!=operation:return None
+    server=payload.get('serverRequest');args=payload.get('requestedArguments')
+    if not isinstance(server,dict) or server.get('requestId')!=operation or not isinstance(args,dict):return None
+    if args.get('screenId')!='com.linkedin.sdui.flagshipnav.jobs.easyapply.EasyApply':return None
+    nested=server.get('requestedArguments',{})
+    if not isinstance(nested,dict):return None
+    outer=args.get('payload');inner=nested.get('payload')
+    allowed={'jobId','questionFieldsList','questionListFieldsList','questionDateFieldsList','followCompany',
+             'trackingCode','companyName','canonicalMemberId','isSubmittingBinding','topChoiceInfo'}
+    if not isinstance(outer,dict) or not isinstance(inner,dict) or not set(outer)<=allowed or not set(inner)<=allowed:return None
+    job=str(outer.get('jobId',''))
+    if not re.fullmatch(r'\d+',job) or str(inner.get('jobId',''))!=job:return None
+    if not isinstance(payload.get('states'),list) or not isinstance(args.get('states'),list):return None
+    for entry in (outer,inner):
+        if any(not isinstance(entry.get(key),list) for key in ('questionFieldsList','questionListFieldsList','questionDateFieldsList')):return None
+    return job
 
 
 class SubmissionMonitor:
@@ -177,9 +199,16 @@ class SubmissionMonitor:
 
     async def route(self, route):
         request = route.request
-        if is_submission(request.url, request.method):
+        if is_submission(request.url, request.method, request.post_data_buffer):
             key = self.armed_request_key if self.armed_request_key and not self.requests else uuid.uuid4().hex
             try:
+                payload=request_json(request.post_data_buffer)
+                linkedin_job=linkedin_submit_job_id(payload)
+                if linkedin_job is not None:
+                    expected=job_key(self.store.get(self.attempt_id)['job_url'])
+                    if not self.armed_request_key or expected!='linkedin:'+linkedin_job:
+                        self.blocked_request=clean_url(request.url)
+                        raise SafetyError('LinkedIn final request has no armed click or targets a different job')
                 if self.pre_submit_review:
                     review = await self.pre_submit_review()
                     self.store.event(self.attempt_id, "pre_submit_review", review)
@@ -198,7 +227,8 @@ class SubmissionMonitor:
             # Expand this list only with endpoint-specific fixtures/evidence.
             path = urlsplit(request.url).path.lower()
             host = (urlsplit(request.url).hostname or "").lower()
-            telemetry = (host.endswith("linkedin.com") and path.startswith("/li/track")) or any(host == suffix or host.endswith("." + suffix) for suffix in (
+            telemetry = ((host.endswith("linkedin.com") and path.startswith("/li/track"))
+                         or (host=='csp.withgoogle.com' and path.startswith('/csp/'))) or any(host == suffix or host.endswith("." + suffix) for suffix in (
                 "google-analytics.com", "googletagmanager.com", "segment.io", "segment.com", "sentry.io",
                 "datadoghq.com", "browser-intake-datadoghq.com", "fullstory.com", "hotjar.com", "mixpanel.com", "amplitude.com",
             ))
@@ -214,6 +244,10 @@ class SubmissionMonitor:
                 auxiliary = True
             if host=='collector-pxdojv695v.protechts.net' and path=='/api/v2/msft':
                 auxiliary = True  # Native site verification; no token is generated or altered here.
+            if host=='dvp.px-cloud.net' and path=='/v':
+                # Observed native verification request. Preserve the site's own request unchanged.
+                # Domain documented at https://docs.humansecurity.com/applications/sensor
+                auxiliary = True
             # Permit the portal's own browser/session verification. No challenge
             # is solved or token fabricated by this code; native site scripts run.
             if is_portal(request.url) and path.startswith("/cdn-cgi/challenge-platform/"):
@@ -358,7 +392,10 @@ class SubmissionMonitor:
                     break
                 accepted = any(row["http_status"] and 200 <= row["http_status"] < 300 and
                                row["request_key"] not in self.rejected_responses for row in sends)
-                if accepted and any(SUCCESS.search(view["text"]) for view in views):
+                expected=job_key(self.store.get(self.attempt_id)['job_url'])
+                confirmations=[view for view in views if SUCCESS.search(view['text'])
+                               and (not expected.startswith('linkedin:') or job_key(view['url'])==expected)]
+                if accepted and confirmations:
                     await self.finish("confirmed", "Successful submit response AND portal confirmation")
                     break
                 await asyncio.sleep(0.5)

@@ -27,6 +27,13 @@ def salary_question(question):
     return bool(re.search(r'salary|salari|remunera|pretensao|renda|taxa hora', normalized(question)))
 
 
+def damaged_text(value):
+    """Catch lossy Windows pipe encoding and typical UTF-8 decoding corruption."""
+    if not isinstance(value,str):return False
+    text=re.sub(r'https?://\S+','',value)
+    return bool('\ufffd' in text or re.search(r'(?<=\w)\?+(?=\w)|Ã[\x80-\xbf]|Â[\x80-\xbf]',text))
+
+
 def sync_profile_facts(directory, before, after):
     """Only explicit profile edits become facts; untouched UI defaults never do."""
     from filelock import FileLock
@@ -55,7 +62,7 @@ def sync_profile_facts(directory, before, after):
 
 
 def valid_value(field, value):
-    if not isinstance(value, (str, bool, int, float)) or value == '':
+    if not isinstance(value, (str, bool, int, float)) or value == '' or damaged_text(value):
         return False
     if field.get('options'):
         return sum(str(value)==str(o['value']) for o in field['options'])==1
@@ -118,6 +125,9 @@ class AnswerBook:
 
     def direct(self, field, context):
         q = normalized(field['label'])
+        if field.get('type')=='checkbox' and re.match(r'^(siga a empresa|follow (?:the )?company)\b',q):
+            # Applying does not authorize opting into unrelated company updates.
+            return {'value':False,'refs':[],'source':'rule'}
         aliases = {
             'name.full': ('full name', 'nome completo'), 'name.first': ('first name', 'nome'),
             'name.last': ('last name', 'sobrenome'), 'email': ('email', 'e mail', 'email address', 'e mail address', 'endereco de email'),

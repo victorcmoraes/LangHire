@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlencode
 
 from filelock import FileLock
-from .application_safety import AttemptStore, ACTIVE, SafetyError, now
+from .application_safety import AttemptStore, ACTIVE, SafetyError, now, job_key
 from .browser_runtime import persistent_browser
 from .easy_answers import AnswerBook, digest, normalized
 from .submission_monitor import SubmissionMonitor, ERROR
@@ -32,9 +32,15 @@ FIELDS = r'''root => {
  for(const [i,e] of [...root.querySelectorAll('input,select,textarea')].entries()){
   if((!visible(e)&&e.type!=='file')||['hidden','submit','button'].includes(e.type)||e.disabled)continue;
   if(/captcha/.test(e.name||''))continue;
-  const box=e.closest('fieldset')||e.closest('.jobs-easy-apply-form-section__grouping')||e.parentElement;
+  const box=e.closest('fieldset')||e.closest('.jobs-easy-apply-form-section__grouping')||e.closest('[role="radiogroup"]')||e.parentElement;
   let label=[...(e.labels||[])].map(x=>x.innerText).join(' ')||e.getAttribute('aria-label')||box.querySelector('legend')?.innerText||'';
   let type=e.getAttribute('role')==='combobox'?'autocomplete':e.type||'text';
+  if(type==='checkbox'&&!label.trim()){
+   for(let n=e.parentElement,d=0;n&&n!==root&&d<5;n=n.parentElement,d++){
+    const text=(n.innerText||'').trim();
+    if(text&&text.length<600){label=text;break;}
+   }
+  }
   if(type==='radio'){
    for(let n=e.parentElement,d=0;n&&n!==root&&d<5;n=n.parentElement,d++){
     if(/\.(pdf|docx?)\b/i.test(n.innerText||'')&&(n.innerText||'').length<400){type='resume-choice';label=n.innerText;break;}
@@ -45,16 +51,21 @@ FIELDS = r'''root => {
   if(type==='radio'){
    if(groups.has(e.name))continue;groups.add(e.name);
    targets=[...root.querySelectorAll('input[type="radio"]')].filter(x=>x.name===e.name);
-   label=box.querySelector('legend')?.innerText||box.querySelector('.fb-dash-form-element__label')?.innerText||label;
-   options=targets.map(x=>({text:[...(x.labels||[])].map(l=>l.innerText).join(' ')||x.value,value:x.value}));
+   label=box.querySelector('legend')?.innerText||box.querySelector('.fb-dash-form-element__label')?.innerText||e.closest('[role="radio"]')?.getAttribute('aria-label')||label;
+   const texts=targets.map(x=>[...(x.labels||[])].map(l=>l.innerText).join(' ').trim()||x.closest('[role="radio"]')?.innerText?.trim()||x.value);
+   const uniqueValues=new Set(targets.map(x=>x.value)).size===targets.length;
+   options=targets.map((x,j)=>({text:texts[j],value:uniqueValues?x.value:texts[j]}));
   }
   targets.forEach((x,j)=>x.setAttribute('data-langhire-field',`${i}-${j}`));
-  fields.push({label:label.trim(),type,required:e.required||e.getAttribute('aria-required')==='true'||/[*✱]/.test(label),
+  const group=e.closest('[role="radiogroup"]');
+  const required=e.required||e.getAttribute('aria-required')==='true'||/[*✱]/.test(label)||group?.getAttribute('aria-required')==='true'||(type==='radio'&&!!group?.parentElement?.innerText?.split('\n').some(line=>line.includes(label)&&/[*✱]/.test(line)));
+  fields.push({label:label.trim(),type,required:!!required,
    options,targets:targets.map(x=>x.getAttribute('data-langhire-field')),name:e.name,
-   value:type==='file'?[...e.files].map(f=>f.name):['checkbox','resume-choice'].includes(type)?e.checked:type==='radio'?(targets.find(x=>x.checked)?.value||''):e.value});
+   value:type==='file'?[...e.files].map(f=>f.name):['checkbox','resume-choice'].includes(type)?e.checked:type==='radio'?(options[targets.findIndex(x=>x.checked)]?.value||''):e.value});
  }
  for(const [i,e] of [...root.querySelectorAll('[role="combobox"], [role="checkbox"], [role="radiogroup"]')].entries()){
   if(['INPUT','SELECT','TEXTAREA'].includes(e.tagName)||!visible(e))continue;
+  if(e.querySelector('input,select,textarea'))continue;
   e.setAttribute('data-langhire-field',`custom-${i}`);
   fields.push({label:e.getAttribute('aria-label')||e.innerText,type:'custom',required:e.getAttribute('aria-required')==='true',options:[],targets:[`custom-${i}`],name:'',value:''});
  }
@@ -75,7 +86,12 @@ class EasyStore:
 
     def reviews(self):
         with self.attempts.db() as db:
-            return [dict(r) for r in db.execute('SELECT * FROM easy_reviews WHERE consumed=0 ORDER BY created_at DESC')]
+            rows=[dict(r) for r in db.execute('SELECT * FROM easy_reviews WHERE consumed=0 ORDER BY created_at DESC')]
+        latest={}
+        protected={job_key(a['job_url']) for a in self.attempts.list() if a['state'] in ('confirmed','uncertain')}
+        for row in rows:
+            if job_key(row['job_url']) not in protected:latest.setdefault(row['job_url'],row)
+        return list(latest.values())  # Older review evidence remains in SQLite and on disk.
 
     def save(self, aid, job, snapshot, facts_version, resume_hash):
         with self.attempts.db() as db:
@@ -163,6 +179,8 @@ class EasyExecutor:
         fields = await modal.evaluate(FIELDS)
         errors = await modal.locator('.artdeco-inline-feedback--error, .fb-dash-form-element__error-field').all_inner_texts()
         alerts=await modal.locator('[role="alert"]').all_inner_texts()
+        required_errors=modal.get_by_text(re.compile(r'^Este campo é obrigatório\.?$|^This field is required\.?$',re.I))
+        errors.extend([await node.inner_text() for node in await required_errors.all() if await node.is_visible()])
         errors.extend(a for a in alerts if ERROR.search(a) or re.search(r'campo obrigat.rio|invalid|required field|preencha|selecione',a,re.I))
         if await modal.locator('[aria-invalid="true"]').count():errors.append('A control reports aria-invalid=true')
         text = await modal.inner_text()
@@ -179,15 +197,30 @@ class EasyExecutor:
         raise SafetyError('Form stage remains disabled or loading')
 
     async def apply_field(self, modal, field, answer):
+        def identity(candidate):
+            return (normalized(candidate['label']),candidate['type'],candidate.get('options',[]))
+        async def current_field():
+            # Controlled components can replace nodes and discard diagnostic attributes.
+            candidates=await modal.evaluate(FIELDS)
+            matches=[candidate for candidate in candidates if identity(candidate)==identity(field)]
+            if len(matches)!=1:raise SafetyError('Control changed or became ambiguous: '+field['label'])
+            return matches[0]
+        field=await current_field()
         value = answer['value']
         target = modal.locator('[data-langhire-field="' + field['targets'][0] + '"]')
         kind = field['type']
         if kind == 'select-one': await target.select_option(str(value))
-        elif kind == 'checkbox': await target.set_checked(value)
+        elif kind == 'checkbox':
+            if await target.is_checked()!=value:
+                label=target.locator('xpath=following-sibling::label[1]')
+                if await label.count():await label.click()
+                else:await target.set_checked(value)
         elif kind == 'radio':
             index = next(i for i, o in enumerate(field['options']) if o['value'] == value)
             target = modal.locator('[data-langhire-field="' + field['targets'][index] + '"]')
-            await target.check()
+            wrapper=target.locator('xpath=ancestor::*[@role="radio"][1]')
+            if await wrapper.count():await wrapper.click()
+            else:await target.check()
         elif kind == 'autocomplete':
             await target.fill('')
             await target.press_sequentially(str(value), delay=30)
@@ -204,6 +237,9 @@ class EasyExecutor:
             await options.click()
             value = await target.input_value()
         else: await target.fill(str(value))
+        current=await current_field()
+        selected=next((i for i,o in enumerate(current.get('options',[])) if o['value']==value),0) if kind=='radio' else 0
+        target=modal.locator('[data-langhire-field="'+current['targets'][selected]+'"]')
         actual = await target.is_checked() if kind in ('checkbox', 'radio') else await target.input_value()
         if (kind == 'radio' and not actual) or (kind != 'radio' and str(actual) != str(value)):
             raise SafetyError('Control did not accept answer: ' + field['label'])

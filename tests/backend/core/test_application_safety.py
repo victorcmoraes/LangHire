@@ -5,6 +5,25 @@ import pytest
 from core.application_safety import AttemptStore, SafetyError
 
 
+@pytest.mark.parametrize('proof,receipt,allowed',[(False,False,False),(True,True,False),(True,False,True)])
+def test_only_operator_audited_never_forwarded_probe_can_be_reconciled(tmp_path,proof,receipt,allowed):
+    store=AttemptStore(tmp_path);aid=store.begin('https://www.linkedin.com/jobs/view/123/')
+    store.intent(aid,'probe','https://www.linkedin.com/jobs/view/123/')
+    if proof:
+        store.event(aid,'supervised_protocol_request_blocked',{'forwarded':False,'attempt':aid})
+        store.event(aid,'operator_reconciliation',{'final_requests_forwarded':0,'confirmed':False})
+    if receipt:store.event(aid,'portal_response',{'status':200})
+    store.transition(aid,'uncertain','Guard blocked final diagnostic')
+    if allowed:
+        store.reconcile_blocked_probe(aid)
+        assert store.get(aid)['state']=='blocked'
+        assert len(store.submissions(aid))==1
+        assert store.begin('https://www.linkedin.com/jobs/view/123/')
+    else:
+        with pytest.raises(SafetyError):store.reconcile_blocked_probe(aid)
+        assert store.get(aid)['state']=='uncertain'
+
+
 def test_duplicate_and_uncertain_are_never_new_attempts(tmp_path):
     store = AttemptStore(tmp_path)
     attempt = store.begin("https://jobs.lever.co/acme/one")

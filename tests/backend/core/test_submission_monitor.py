@@ -1,6 +1,7 @@
 """Real Chromium + local intercepted fixtures. No real ATS requests or LLMs."""
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 from playwright.async_api import async_playwright
@@ -220,3 +221,52 @@ async def test_linkedin_widget_tracking_is_not_a_submission_or_fatal_error(fixtu
     await page.evaluate("fetch('https://www.linkedin.com/li/track', {method:'POST'}).catch(()=>null)")
     assert monitor.blocked_request is None
     assert store.submissions(attempt) == []
+
+
+async def test_browser_csp_report_is_blocked_without_blocking_the_application(fixture_portal):
+    page,data,store,aid,monitor=fixture_portal
+    await page.evaluate("fetch('https://csp.withgoogle.com/csp/frame-ancestors/fixture',{method:'POST',body:'report'}).catch(()=>null)")
+    assert monitor.blocked_request is None
+    assert store.submissions(aid)==[]
+    assert data['received']==0
+
+
+@pytest.mark.parametrize('armed,target,received,confirmation',[(False,'123',0,'123'),(True,'456',0,'456'),(True,'123',1,'123'),(True,'123',1,'456')])
+async def test_modern_linkedin_final_requires_armed_matching_job_and_preserves_one_intent(tmp_path,monkeypatch,armed,target,received,confirmation):
+    payload=json.loads((Path(__file__).resolve().parents[2]/'fixtures/linkedin/rsc-final-submit.json').read_text())
+    payload['requestedArguments']['payload']['jobId']=target
+    payload['serverRequest']['requestedArguments']['payload']['jobId']=target
+    async with async_playwright() as p:
+        browser=await p.chromium.launch(channel='chrome',headless=True);context=await browser.new_context()
+        seen=[]
+        async def serve(route):
+            if route.request.method=='POST':
+                seen.append(route.request.url)
+                await route.fulfill(content_type='application/json',body='{"success":true}')
+            else:await route.fulfill(content_type='text/html',body='<h1>Backend Fixture</h1>')
+        await context.route('**/*',serve)
+        store=AttemptStore(tmp_path);aid=store.begin('https://www.linkedin.com/jobs/view/123/')
+        monitor=SubmissionMonitor(store,aid);await monitor.attach_context(context)
+        page=await context.new_page();await page.goto('https://www.linkedin.com/jobs/view/123/')
+        if armed:monitor.arm_submission(page.url)
+        await page.evaluate('''async payload=>{try{const r=await fetch('/flagship-web/rsc-action/actions/server-request',{method:'POST',body:JSON.stringify(payload)});if(r.ok)document.body.innerText='Application submitted';}catch{}}''',payload)
+        if monitor.response_tasks:await asyncio.gather(*monitor.response_tasks)
+        assert len(seen)==received
+        if received:
+            if confirmation!=target:
+                async def other_job_view():return [{'url':'https://www.linkedin.com/jobs/view/'+confirmation+'/', 'text':'Application submitted','challenge':False}]
+                monitor.observe=other_job_view
+                async def no_wait(_):pass
+                monkeypatch.setattr('core.submission_monitor.asyncio.sleep',no_wait)
+            assert (await monitor.finalize())['state']==('confirmed' if confirmation==target else 'uncertain')
+            assert len(store.submissions(aid))==1
+        else:assert monitor.blocked_request
+        await monitor.close();await browser.close()
+
+
+async def test_observed_native_verification_is_forwarded_unchanged_without_an_application_intent(fixture_portal):
+    page,data,store,aid,monitor=fixture_portal
+    await page.evaluate("fetch('https://dvp.px-cloud.net/v',{method:'POST',body:'native-browser-verification'}).catch(()=>null)")
+    assert monitor.blocked_request is None
+    assert data['body']==b'native-browser-verification'
+    assert store.submissions(aid)==[]

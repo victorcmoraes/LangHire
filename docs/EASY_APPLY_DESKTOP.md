@@ -69,6 +69,11 @@ libera aprovação autônoma de respostas abertas.
 
 A interface desktop e o sidecar empacotado foram abertos e autenticados usando os dados reais. Os testes locais demonstram três revisões com o mesmo executor, envio único, respostas contextualizadas, retomada, deduplicação, bloqueio de concorrência e limite diário. Há casos de português/inglês, layout sem h1, nomes acessíveis extensos, carregamento, alertas, documentos e confirmação de histórico.
 
-No portal real, o login e a coleta funcionaram. A preparação avançou pelo contato, currículo e carta opcional e ficou pendente de confirmação do histórico do perfil. **Ainda não há três revisões reais prontas nem novos envios confirmados. O piloto permanece aberto.** O reconhecimento de operações auxiliares não constitui aprovação de formatos novos de envio final.
+No portal real, a rodada supervisionada completou **três revisões e três envios
+confirmados em três empresas**, com nova conferência dos status em uma sessão de
+leitura. O formato final observado do LinkedIn possui fixture e validação da
+identidade da vaga antes do envio. Operações desconhecidas continuam bloqueadas.
+O piloto maior de dez confirmações entre plataformas permanece aberto, e o teto
+de 200 ainda não foi liberado. Veja `EASY_APPLY_PILOT_STATUS.md` para o marco atual.
 
 A suíte completa da interface mantém as oito falhas de traduções já existentes no upstream (jobs.json de italiano e chinês ausentes). Elas não foram ocultadas ou substituídas por traduções fictícias.

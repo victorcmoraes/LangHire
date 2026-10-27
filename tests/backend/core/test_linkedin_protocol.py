@@ -2,9 +2,31 @@
 import gzip
 import json
 import pytest
+from pathlib import Path
+from copy import deepcopy
 from core.submission_monitor import linkedin_request_kind, request_metadata
 
 ROOT='https://www.linkedin.com/flagship-web/rsc-action/actions/'
+
+
+def submit_fixture():
+    return json.loads((Path(__file__).resolve().parents[2]/'fixtures/linkedin/rsc-final-submit.json').read_text())
+
+
+def test_observed_final_submit_is_separate_from_preparation_requests():
+    from core.submission_monitor import is_submission,linkedin_submit_job_id
+    payload=submit_fixture()
+    assert linkedin_request_kind(ROOT+'server-request','POST',json.dumps(payload))=='submit'
+    assert is_submission(ROOT+'server-request','POST',json.dumps(payload))
+    assert linkedin_submit_job_id(payload)=='123'
+    bad=deepcopy(payload);bad['serverRequest']['requestedArguments']['payload']['jobId']='456'
+    assert linkedin_request_kind(ROOT+'server-request','POST',json.dumps(bad))=='unsupported'
+    bad=deepcopy(payload);bad['requestId']+='Application'
+    assert linkedin_request_kind(ROOT+'server-request','POST',json.dumps(bad))=='unsupported'
+    bad=deepcopy(payload);bad['requestedArguments']['payload']['unknownMutation']=True
+    assert linkedin_request_kind(ROOT+'server-request','POST',json.dumps(bad))=='unsupported'
+    bad=deepcopy(payload);del bad['states']
+    assert linkedin_request_kind(ROOT+'server-request','POST',json.dumps(bad))=='unsupported'
 
 
 @pytest.mark.parametrize('name',['aboutTheJob','aboutTheCompanyForJobDetails','peopleWhoCanHelp','howYouFitGuide',

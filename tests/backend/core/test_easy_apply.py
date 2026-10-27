@@ -32,8 +32,15 @@ async def portal(tmp_path,request):
         html=html.replace('>Review<','>Avaliar<')
     if getattr(request,'param','en')=='delayed':
         html=html.replace('step++;render();','step++;modal.insertAdjacentHTML("beforeend","<div role=alert>Upload completed</div>");setTimeout(render,100);')
+    if getattr(request,'param','en')=='follow':
+        html=html.replace('<button onclick="send()">Submit application</button>', '<div><div><input type="checkbox" checked id="follow"><label for="follow" style="display:inline-block;width:20px;height:20px"></label></div><p>Siga a empresa Fixture para ficar por dentro das novidades</p></div><button onclick="send()">Submit application</button>')
     if getattr(request,'param','en')=='profile':
         html=html.replace('render();</script>', '''const basicRender=render;render=function(){if(step===2){modal.innerHTML='<h2>Experience</h2><p>Confirmed fixture history</p><button onclick="next()">Next</button>';}else basicRender();};render();</script>''')
+    if getattr(request,'param','en')=='modern-radio':
+        html=html.replace('render();</script>', '''const baseRender=render;render=function(){if(step===2){modal.innerHTML=`<section><p>AI integration experience?*</p><div role="radiogroup"><div role="radio" aria-label="AI integration experience?" onclick="this.querySelector('input').checked=true"><input id="yes" type="radio" name="ai"><label for="yes"></label><p>Yes</p></div><div role="radio" aria-label="AI integration experience?" onclick="this.querySelector('input').checked=true"><input id="no" type="radio" name="ai"><label for="no"></label><p>No</p></div></div></section><button onclick="next()">Review</button>`;}else baseRender();};render();</script>''')
+        html=html.replace("this.querySelector('input').checked=true", "values.ai=this.querySelector('input').id;render()")
+        html=html.replace('<input id="yes" type="radio" name="ai">', '<input id="yes" type="radio" name="ai" ${values.ai===\'yes\'?\'checked\':\'\'}>')
+        html=html.replace('<input id="no" type="radio" name="ai">', '<input id="no" type="radio" name="ai" ${values.ai===\'no\'?\'checked\':\'\'}>')
     received=[]
     async with async_playwright() as p:
         browser=await p.chromium.launch(channel='chrome',headless=True)
@@ -74,6 +81,45 @@ async def test_portuguese_avaliar_advances_to_review_without_submission(portal):
     _,result=await run(portal)
     assert result['state']=='reviewed'
     assert not portal[-1]
+
+
+@pytest.mark.parametrize('portal',['modern-radio'],indirect=True)
+async def test_nested_accessible_radios_with_identical_on_values_are_required_and_verified(portal):
+    from core.easy_answers import AnswerBook
+    with pytest.raises(SafetyError,match='Unresolved fields'):
+        await run(portal)
+    book=AnswerBook(portal[2]);question=book.list()[0]
+    assert question['question']=='AI integration experience?'
+    assert question['field']['required'] is True
+    assert [o['value'] for o in question['field']['options']]==['Yes','No']
+    book.approve(question['id'],'Yes')
+    # Direct fixture runner leaves failed attempts active; production execute_easy recovers them.
+    book.store.recover()
+    _,result=await run(portal)
+    assert result['state']=='reviewed'
+    assert portal[-1]==[]
+
+
+@pytest.mark.parametrize('portal',['follow'],indirect=True)
+async def test_review_opts_out_of_unrelated_company_updates_with_adjacent_label(portal):
+    _,result=await run(portal)
+    assert result['state']=='reviewed'
+    assert not await portal[0].locator('#follow').is_checked()
+    assert not portal[-1]
+
+
+def test_review_list_hides_superseded_and_confirmed_jobs_without_deleting_evidence(tmp_path):
+    easy=EasyStore(tmp_path);url='https://www.linkedin.com/jobs/view/123/'
+    ids=[]
+    for n in range(2):
+        aid=easy.attempts.begin(url);ids.append(aid)
+        easy.save(aid,{'url':url},{'version':n},'facts','resume')
+        easy.attempts.transition(aid,'reviewed')
+    assert [r['id'] for r in easy.reviews()]==[ids[-1]]
+    aid=easy.attempts.begin('https://linkedin.com/jobs/view/123?trackingId=fixture')
+    easy.attempts.transition(aid,'confirmed','Fixture receipt')
+    assert easy.reviews()==[]
+    with easy.attempts.db() as db:assert db.execute('SELECT COUNT(*) FROM easy_reviews').fetchone()[0]==2
 
 
 async def test_review_mismatch_blocks_before_any_submission(portal):

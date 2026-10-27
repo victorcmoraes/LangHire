@@ -128,6 +128,27 @@ class AttemptStore:
                 raise SafetyError("This attempt has no live human hold")
             db.execute("UPDATE attempts SET acknowledged=1,updated_at=? WHERE id=?", (now(), attempt_id))
 
+    def reconcile_blocked_probe(self, attempt_id):
+        """Operator-only recovery for a diagnosed final call proven not forwarded.
+
+        Ordinary uncertain submissions have no such evidence and stay protected.
+        The original intent and its daily charge are never deleted.
+        """
+        with self.db() as db:
+            row=db.execute('SELECT state FROM attempts WHERE id=?',(attempt_id,)).fetchone()
+            probes=[json.loads(r[0]) for r in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='supervised_protocol_request_blocked'",(attempt_id,))]
+            audits=[json.loads(r[0]) for r in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='operator_reconciliation'",(attempt_id,))]
+            sends=db.execute('SELECT http_status FROM submissions WHERE attempt_id=?',(attempt_id,)).fetchall()
+            receipts=db.execute("SELECT 1 FROM events WHERE attempt_id=? AND kind IN ('portal_response','confirmed')",(attempt_id,)).fetchone()
+            if (not row or row['state']!='uncertain' or len(probes)!=1 or probes[0].get('forwarded') is not False
+                    or probes[0].get('attempt')!=attempt_id or len(sends)!=1 or sends[0][0] is not None or receipts
+                    or not any(a.get('final_requests_forwarded')==0 and a.get('confirmed') is False for a in audits)):
+                raise SafetyError('No operator-verified proof that the diagnostic final request was never forwarded')
+            message='Operator reconciled diagnostic request blocked before forwarding; original intent remains counted'
+            db.execute("UPDATE attempts SET state='blocked',message=?,updated_at=? WHERE id=?",(message,now(),attempt_id))
+            db.execute('INSERT INTO events(attempt_id,at,kind,payload) VALUES(?,?,?,?)',
+                       (attempt_id,now(),'probe_reconciled',json.dumps({'message':message})))
+
     async def wait_for_human(self, attempt_id, message, cancel=None):
         self.transition(attempt_id, "awaiting_human", message)
         print(f"\nCAPTCHA / intervenção: {message}\nTentativa: {attempt_id}\n"

@@ -1,6 +1,6 @@
 import json
 import pytest
-from core.easy_answers import AnswerBook, sync_profile_facts
+from core.easy_answers import AnswerBook, sync_profile_facts, valid_value, damaged_text
 from core.application_safety import SafetyError
 
 
@@ -13,6 +13,19 @@ def book(tmp_path):
 
 def field(label='Years of experience', **kwargs):
     return dict(label=label,type='number',options=[],required=True,**kwargs)
+
+
+def test_portuguese_roundtrip_and_rejection_of_damaged_application_answers(tmp_path):
+    b=book(tmp_path);q={'label':'Descreva uma integração','type':'textarea','options':[]}
+    text='Integração entre APIs: validação, preços, simulação e solução com revisão.'
+    aid=b.resolve(q,{'url':'job'})['pending'];b.approve(aid,text)
+    assert AnswerBook(tmp_path).resolve(q,{'url':'job'})['value']==text
+    assert valid_value(q,text)
+    for broken in ['Integra??o entre APIs','Valida\ufffd\ufffdo',text.encode('utf-8').decode('latin1')]:
+        assert damaged_text(broken)
+        with pytest.raises(SafetyError):b.approve(aid,broken)
+    assert not damaged_text('Ready? Yes. Você confirma?')
+    assert not damaged_text('https://example.invalid/project?ref=application')
 
 
 def test_unknown_never_uses_defaults_and_equivalent_questions_group_by_context(tmp_path):
