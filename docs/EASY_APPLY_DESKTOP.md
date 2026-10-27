@@ -40,6 +40,14 @@ O catálogo contém propostas: código existente não comprova autoria individua
 uso profissional, métricas ou decisões de POC. Essas afirmações não são
 importadas automaticamente como respostas confirmadas para candidaturas.
 
+O botão “Propor com 8b” usa o cadastro e amostras dos arquivos desse catálogo
+para elaborar respostas abertas, sem exigir uma resposta idêntica pré-cadastrada.
+As referências são limitadas aos IDs fornecidos ao modelo. Propostas apoiadas
+em projetos passam por outra chamada local de revisão de evidências antes de
+aparecer no app. As duas chamadas entram na contagem de uso do modelo.
+Mudanças nos arquivos usados invalidam respostas derivadas. A confirmação humana
+continua necessária; a descrição gerada no inventário não é tratada como fato.
+
 ## Implementação e evidências
 
 - Estados do executor: abrir vaga/modal, identificar etapa, resolver/preencher, conferir, avançar, revisar e enviar uma vez.

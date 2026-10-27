@@ -128,3 +128,33 @@ async def test_model_abstention_is_normal_result_and_preserves_pending(tmp_path,
     assert result['supported'] is False
     assert result['reason']=='missing_facts'
     assert b.list()[0]['state']=='pending'
+
+
+async def test_open_answer_uses_repository_files_and_invalidates_if_evidence_changes(tmp_path,monkeypatch):
+    book(tmp_path);catalog=tmp_path/'github';catalog.mkdir()
+    path=catalog/'integration.json'
+    record={'repository':'candidate/integration','commit':'one','evidence':[
+        {'path':'README.md','ref':'file:1','url':'https://github.com/candidate/integration/blob/one/README.md',
+         'content':'Integration experiment: compared batch and webhook delivery.'}],
+        'analysis':{'application_draft':'UNVERIFIED_MODEL_CLAIM'}}
+    path.write_text(json.dumps(record))
+    b=AnswerBook(tmp_path);q={'label':'Describe an integration experiment','type':'textarea','options':[]}
+    aid=b.resolve(q,{'url':'job'})['pending'];ref='github:candidate/integration:README.md'
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self):return json.dumps({'message':{'content':json.dumps({'supported':True,'value':'Compared batch and webhook delivery.','refs':[ref]})}}).encode()
+    def model(req,**kwargs):
+        payload=json.loads(req.data)
+        assert ref in payload['format']['properties']['refs']['items']['enum']
+        assert 'UNVERIFIED_MODEL_CLAIM' not in str(payload)
+        assert 'professional' in payload['messages'][0]['content']
+        return Response()
+    monkeypatch.setattr('urllib.request.urlopen',model)
+    result=await b.propose(aid,{})
+    assert result['supported'] is True
+    assert 'pending' in b.resolve(q,{'url':'job'})
+    b.approve(aid,result['value'])
+    assert b.resolve(q,{'url':'job'})['source']=='cache'
+    record['commit']='two';path.write_text(json.dumps(record))
+    assert 'pending' in AnswerBook(tmp_path).resolve(q,{'url':'job'})

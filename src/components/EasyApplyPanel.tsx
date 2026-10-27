@@ -25,6 +25,7 @@ function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: ()
     {question.field.options?.length ? <select aria-label={question.question} value={String(value)} onChange={e=>setValue(e.target.value)} className="input-base">
       <option value="">Selecione</option>{question.field.options.map(o=><option key={o.value} value={o.value}>{o.text}</option>)}
     </select> : question.field.type==='checkbox' ? <label><input type="checkbox" checked={value===true} onChange={e=>setValue(e.target.checked)}/> Sim</label>
+      : question.field.type==='textarea' ? <textarea aria-label={question.question} className="input-base" rows={5} value={String(value)} onChange={e=>setValue(e.target.value)}/>
       : <input aria-label={question.question} className="input-base" value={String(value)} onChange={e=>setValue(e.target.value)}/>}
     {isSalary && <div className="flex gap-3">
       <label>Moeda desta resposta<input aria-label={`Moeda: ${question.question}`} className="input-base" placeholder="BRL, USD..." maxLength={3} value={currency} readOnly={!!question.context.currency} onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
@@ -33,7 +34,7 @@ function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: ()
       </select></label>
     </div>}
     {isSalary && (!currency || !period) && <p className="text-sm">Confirma a moeda e o período para salvar este valor no contexto certo.</p>}
-    <div className="flex gap-3"><button className="btn-secondary mr-2" disabled={busy} onClick={()=>void perform(async()=>{const result=await proposeEasyAnswer(question.id);if(result.supported===false)setNotice(result.message || 'Faltam fatos no cadastro. Informe a resposta para confirmar.');})}>Propor com 8b</button>
+    <div className="flex gap-3"><button className="btn-secondary mr-2" disabled={busy} onClick={()=>void perform(async()=>{const result=await proposeEasyAnswer(question.id);if(result.message)setNotice(result.message);else if(result.supported===false)setNotice('Faltam fatos no cadastro. Informe a resposta para confirmar.');})}>Propor com 8b</button>
       <button className="btn-secondary mr-2" disabled={busy || value==='' || (isSalary && (!/^[A-Z]{3}$/.test(currency) || !period))} onClick={()=>void perform(()=>isSalary ? approveEasyAnswer(question.id,value,{currency,period}) : approveEasyAnswer(question.id,value))}>Confirmar e reutilizar</button></div>
     {question.refs.length>0 && <p className="text-xs">Fatos: {question.refs.join(', ')}</p>}
     {error && <p role="alert">{error}</p>}
