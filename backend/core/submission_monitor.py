@@ -51,8 +51,10 @@ def confirmation_matches_job(job_url, view_url):
                 and (expected.port or 443) == (observed.port or 443)
                 and observed.path.rstrip('/') in (base, base + '/apply', base + '/thanks'))
     if greenhouse_job_id(job_url):
+        board,identifier=greenhouse_job_id(job_url)
         return (greenhouse_job_id(job_url)==greenhouse_job_id(view_url)
-                and observed.scheme=='https' and (observed.port or 443)==443)
+                and observed.scheme=='https' and (observed.port or 443)==443
+                and observed.path.rstrip('/')==f'/{board}/jobs/{identifier}/confirmation')
     return True
 
 

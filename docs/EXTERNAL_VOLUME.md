@@ -38,6 +38,10 @@ HTTP 428, evidence and charge remain. A lost session or ordinary uncertain
 attempt cannot enter this continuation path. Code values are masked in monitor
 screenshots and omitted from event payloads.
 
+For current hosted Greenhouse pages, confirmation must be on that job's
+`/confirmation` route. Posting text such as “Application submitted (you are
+here)” in an employer's interview-process description is not a receipt.
+
 The first real Greenhouse attempt reached this email-verification precondition
 before support was added, so it remains uncertain and protected. The new
 continuation is fixture-tested, not yet validated with a real confirmation.

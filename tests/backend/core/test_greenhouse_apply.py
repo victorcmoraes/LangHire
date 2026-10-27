@@ -34,7 +34,7 @@ async def hosted_gh(tmp_path):
     <script>
     fetch('/uncacheable_attributes/presigned_fields').then(r=>r.json()).then(()=>window.uploaderReady=true);
     function choose(e,value){const container=e.closest('.select__container');container.querySelector('.select__single-value').textContent=e.textContent;container.querySelector('.select__requiredInput').value=value;container.querySelector('#english').value='';document.getElementById('choices').hidden=true;}
-    document.querySelector('form').onsubmit=async e=>{e.preventDefault();const code=[...document.querySelectorAll('[id^="security-input-"]')].map(e=>e.value).join('');const r=await fetch('https://boards.greenhouse.io/fixture/jobs/123',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_application:{first_name:document.getElementById('first_name').value,email:document.getElementById('email').value},...(code?{security_code:code}:{})})});const result=await r.json();if(r.status===428&&result.code==='captcha-failed'){const field=document.createElement('div');field.className='email-verification';field.textContent='A verification code was sent. Enter the 8-character code.';for(let i=0;i<8;i++){const input=document.createElement('input');input.id='security-input-'+i;input.setAttribute('aria-required','true');input.maxLength=1;field.append(input);}e.target.append(field);}else document.body.innerText=r.ok?'Thank you for applying':'There was an error verifying your application';};
+    document.querySelector('form').onsubmit=async e=>{e.preventDefault();const code=[...document.querySelectorAll('[id^="security-input-"]')].map(e=>e.value).join('');const r=await fetch('https://boards.greenhouse.io/fixture/jobs/123',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_application:{first_name:document.getElementById('first_name').value,email:document.getElementById('email').value},...(code?{security_code:code}:{})})});const result=await r.json();if(r.status===428&&result.code==='captcha-failed'){const field=document.createElement('div');field.className='email-verification';field.textContent='A verification code was sent. Enter the 8-character code.';for(let i=0;i<8;i++){const input=document.createElement('input');input.id='security-input-'+i;input.setAttribute('aria-required','true');input.maxLength=1;field.append(input);}e.target.append(field);}else{if(r.ok)history.replaceState(null,'','/fixture/jobs/123/confirmation');document.body.innerText=r.ok?'Thank you for applying':'There was an error verifying your application';}};
     </script>'''
     received=[];state={'status':200,'email_code_required':False}
     async with async_playwright() as p:
@@ -94,6 +94,9 @@ def test_greenhouse_final_format_and_confirmation_are_job_bound():
     assert confirmation_matches_job(URL,'https://job-boards.greenhouse.io/fixture/jobs/123/confirmation')
     assert not confirmation_matches_job(URL,'https://job-boards.greenhouse.io/fixture/jobs/456/confirmation')
     assert not confirmation_matches_job(URL,'https://boards.greenhouse.io:8443/fixture/jobs/123/confirmation')
+    # Some real descriptions list "Application submitted (you are here)" as
+    # their interview process. The posting itself is never a GH receipt page.
+    assert not confirmation_matches_job(URL,URL)
 
 
 async def test_email_code_waits_for_human_then_creates_a_second_counted_attempt(hosted_gh):

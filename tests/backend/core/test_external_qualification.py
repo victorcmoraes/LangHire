@@ -34,3 +34,9 @@ def test_unknown_arrangement_and_country_are_pending():
 
 def test_explicit_remote_work_type_is_supported():
     assert qualify(job('Requirements:\nJava\nWork Type:\nRemote',location='Brazil, Colombia'),FACTS)['state']=='eligible'
+
+
+def test_specialist_accounting_and_production_ml_are_not_implied_by_general_engineering():
+    assert qualify(job('Requirements:\nPython',title='Software Engineer II with Accounting Experience'),FACTS)['state']=='pending'
+    description='Requirements:\n2+ years of software engineering experience, with a strong focus on ML engineering and deploying machine learning models in production.'
+    assert qualify(job(description),FACTS)['reason']=='specific_production_ml_requirement'

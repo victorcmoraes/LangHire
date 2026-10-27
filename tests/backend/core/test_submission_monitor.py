@@ -191,6 +191,7 @@ async def test_embedded_ats_form_is_observed_across_frames(fixture_portal):
     frame = page.frame_locator("iframe")
     await frame.get_by_role("button", name="Submit application").click()
     await frame.get_by_text("Application submitted", exact=True).wait_for()
+    await frame.locator('body').evaluate("()=>history.replaceState(null,'','/acme/jobs/123/confirmation')")
     assert (await monitor.finalize())["state"] == "confirmed"
     assert data["received"] == 1
 

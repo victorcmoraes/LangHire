@@ -23,13 +23,15 @@ def required_text(description):
 def qualify(job,facts):
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
-        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR']}
+        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML']}
     if not TRACK.search(normalized(title)):return result('discarded','outside_tracks',[title])
     if EXCLUDED.search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
     if re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
         return result('discarded','pure_frontend_outside_tracks',[title])
     if re.search(r'exclusiv[ao]|applicants only|afirmativ[ao]|affirmative',normalized(title)):
         return result('pending','affirmative_eligibility_not_confirmed',[title])
+    if re.search(r'accounting experience',title,re.I) and not facts.get('experience.accounting',{}).get('value'):
+        return result('pending','specialized_requirement_needs_evidence',[title])
     years=facts.get('experience.years',{}).get('value')
     for line in required.splitlines():
         if re.search(r'preferred|desej[aá]vel|nice.to.have',line,re.I):continue
@@ -39,6 +41,8 @@ def qualify(job,facts):
             if int(duration[1])>years:return result('discarded','mandatory_duration_above_confirmed',[line])
     niche=re.search(r'\b(?:SAP|FICO|DMPS|ABAP|Workato|Elixir|Scala|Solidity|Rust|Salesforce|Protheus)\b',required,re.I)
     if niche:return result('pending','specialized_requirement_needs_evidence',[niche[0]])
+    if re.search(r'ml engineering[^\n]{0,120}machine learning models in production',required,re.I) and not facts.get('experience.productionML',{}).get('value'):
+        return result('pending','specific_production_ml_requirement',[line for line in required.splitlines() if re.search('machine learning models in production',line,re.I)])
     if re.search(r'\b(?:must|required|obrigatorio)\b.{0,160}\bcnpj\b',normalized(required)) and not facts.get('business.activeEntityBR',{}).get('value'):
         return result('pending','active_business_entity_not_confirmed',[line for line in required.splitlines() if 'CNPJ' in line])
     if re.search(r'(?:production.*LangGraph|LangGraph.*production)',required,re.I):
