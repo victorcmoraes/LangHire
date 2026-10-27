@@ -14,7 +14,7 @@ from .submission_monitor import SubmissionMonitor, ERROR
 
 EASY = re.compile(r'\b(easy apply|candidatura simplificada)\b', re.I)
 NEXT = re.compile(r'^(next|continue|avançar|continuar|próximo)(?:\s|$)', re.I)
-REVIEW = re.compile(r'^(review|revisar|revisar candidatura)(?:\s|$)', re.I)
+REVIEW = re.compile(r'^(review|revisar|revisar candidatura|avaliar)(?:\s|$)', re.I)
 SUBMIT = re.compile(r'^(submit application|enviar candidatura|enviar inscrição)(?:\s|$)', re.I)
 
 

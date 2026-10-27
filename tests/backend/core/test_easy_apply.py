@@ -28,6 +28,8 @@ async def portal(tmp_path,request):
     if getattr(request,'param','en')=='modern':
         html=html.replace('<h1>Backend Engineer</h1>','<title>Backend Engineer | Fixture | LinkedIn</title><main><h2>About the job</h2><p>Backend Engineer</p></main>')
         html=html.replace('<button onclick="document.querySelector','<button aria-label="Use Easy Apply for this job" onclick="document.querySelector',1)
+    if getattr(request,'param','en')=='avaliar':
+        html=html.replace('>Review<','>Avaliar<')
     if getattr(request,'param','en')=='delayed':
         html=html.replace('step++;render();','step++;modal.insertAdjacentHTML("beforeend","<div role=alert>Upload completed</div>");setTimeout(render,100);')
     if getattr(request,'param','en')=='profile':
@@ -65,6 +67,13 @@ async def test_same_executor_reviews_three_jobs_without_sending_and_submits_once
     assert result['state']=='confirmed'
     assert len(portal[-1])==1
     with pytest.raises(SafetyError):await run(portal,'123')
+
+
+@pytest.mark.parametrize('portal',['avaliar'],indirect=True)
+async def test_portuguese_avaliar_advances_to_review_without_submission(portal):
+    _,result=await run(portal)
+    assert result['state']=='reviewed'
+    assert not portal[-1]
 
 
 async def test_review_mismatch_blocks_before_any_submission(portal):
