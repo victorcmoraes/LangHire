@@ -258,6 +258,13 @@ async def test_browser_csp_report_is_blocked_without_blocking_the_application(fi
     assert data['received']==0
 
 
+async def test_greenhouse_snowplow_tracking_does_not_poison_an_application(fixture_portal):
+    page,data,store,aid,monitor=fixture_portal
+    await page.evaluate("fetch('https://c.spl.greenhouse.io/com.snowplowanalytics.snowplow/tp2',{method:'POST',body:'tracking'}).catch(()=>null)")
+    assert monitor.blocked_request is None and data['received']==0
+    assert not store.submissions(aid)
+
+
 @pytest.mark.parametrize('armed,target,received,confirmation',[(False,'123',0,'123'),(True,'456',0,'456'),(True,'123',1,'123'),(True,'123',1,'456')])
 async def test_modern_linkedin_final_requires_armed_matching_job_and_preserves_one_intent(tmp_path,monkeypatch,armed,target,received,confirmation):
     payload=json.loads((Path(__file__).resolve().parents[2]/'fixtures/linkedin/rsc-final-submit.json').read_text())

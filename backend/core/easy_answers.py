@@ -125,6 +125,41 @@ class AnswerBook:
 
     def direct(self, field, context):
         q = normalized(field['label'])
+        if context.get('country')=='BR':
+            resident=self.facts.get('location.country')
+            if resident and normalized(str(resident['value'])) in ('br','brasil','brazil') and q in ('are you based in brazil','voce reside no brasil'):
+                choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
+                if len(choices)==1:return {'value':choices[0],'refs':['location.country'],'source':'rule'}
+            cpf=self.facts.get('identity.cpf')
+            if cpf and re.fullmatch(r'(?:numero do )?cpf(?: somente numeros| apenas numeros)?',q):
+                if valid_value(field,cpf['value']):return {'value':cpf['value'],'refs':['identity.cpf'],'source':'rule'}
+            nationality=self.facts.get('nationality')
+            if nationality and normalized(str(nationality['value'])) in ('brazilian','brasileiro','brasileira'):
+                if q in ('nationality','nacionalidade'):
+                    if field.get('options'):
+                        choices=[o['value'] for o in field['options'] if normalized(o['text']) in ('brazilian','brasileiro','brasileira','brasil','brazil')]
+                        if len(choices)==1:return {'value':choices[0],'refs':['nationality'],'source':'rule'}
+                    else:return {'value':'Brasileira' if context.get('language')=='pt' else 'Brazilian','refs':['nationality'],'source':'rule'}
+                if re.search(r'are you a citizen or permanent resident of the country',q):
+                    choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
+                    if len(choices)==1:return {'value':choices[0],'refs':['nationality'],'source':'rule'}
+                if re.search(r'do you have the legal right to live and work in the location|are you authorized to work in the country you reside',q):
+                    choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
+                    if len(choices)==1:return {'value':choices[0],'refs':['nationality'],'source':'rule'}
+        if re.fullmatch(r'if you ?re currently employed where are you currently working please enter the full company name',q) and 'employer.current' in self.facts:
+            return {'value':self.facts['employer.current']['value'],'refs':['employer.current'],'source':'rule'}
+        years=self.facts.get('experience.years')
+        if years and q=='how many years of experience do you have working with python' and 'Python' in self.facts.get('skills',{}).get('value',[]):
+            return {'value':years['value'],'refs':['experience.years','skills'],'source':'rule'}
+        if re.fullmatch(r'(?:english level|what is your english proficiency level|nivel de ingles)',q) and 'level.english' in self.facts:
+            level=normalized(str(self.facts['level.english']['value']))
+            aliases={'proficient':('proficient','full professional proficiency'),
+                     'advanced':('advanced','avancado'),
+                     'intermediate':('intermediate','intermediario'),
+                     'basic':('basic','basico')}
+            for label in aliases.get(level,(level,)):
+                choices=[o['value'] for o in field.get('options',[]) if normalized(o['text'])==label]
+                if len(choices)==1:return {'value':choices[0],'refs':['level.english'],'source':'rule'}
         if field.get('type')=='checkbox' and re.match(r'^(siga a empresa|follow (?:the )?company)\b',q):
             # Applying does not authorize opting into unrelated company updates.
             return {'value':False,'refs':[],'source':'rule'}

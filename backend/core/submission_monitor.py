@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
 import uuid
 import zlib
 from urllib.parse import urlsplit, urlunsplit, parse_qs
@@ -49,7 +50,27 @@ def confirmation_matches_job(job_url, view_url):
                 and expected.hostname == observed.hostname
                 and (expected.port or 443) == (observed.port or 443)
                 and observed.path.rstrip('/') in (base, base + '/apply', base + '/thanks'))
+    if greenhouse_job_id(job_url):
+        return (greenhouse_job_id(job_url)==greenhouse_job_id(view_url)
+                and observed.scheme=='https' and (observed.port or 443)==443)
     return True
+
+
+def greenhouse_job_id(url):
+    parsed=urlsplit(url)
+    if parsed.hostname not in ('boards.greenhouse.io','job-boards.greenhouse.io'):return None
+    match=re.fullmatch(r'/([\w-]+)/jobs/(\d+)(?:/confirmation)?/?',parsed.path)
+    return (match[1],match[2]) if match else None
+
+
+def greenhouse_submit_job(url,method,body):
+    parsed=urlsplit(url)
+    payload=request_json(body)
+    if (method=='POST' and parsed.scheme=='https' and (parsed.port or 443)==443
+            and re.fullmatch(r'/[\w-]+/jobs/\d+/?',parsed.path)
+            and isinstance(payload,dict) and isinstance(payload.get('job_application'),dict)):
+        return greenhouse_job_id(url)
+    return None
 
 
 def is_portal(url):
@@ -64,6 +85,7 @@ def is_submission(url, method, body=None):
     path = urlsplit(url).path.lower()
     if (urlsplit(url).hostname or '').endswith('linkedin.com'):
         return linkedin_request_kind(url, method, body) == 'submit'
+    if greenhouse_submit_job(url,method,body):return True
     return bool(re.search(r"/(?:apply|applications?|jobapplications|easyapply)$|"
                           r"/boards/[^/]+/jobs/[^/]+$|/jobs/[^/]+/apply$|"
                           r"voyagerjobs.*(?:onsiteapply|jobapplications)|jobs(?:onsiteapply|apply)", path))
@@ -196,6 +218,8 @@ class SubmissionMonitor:
         self.armed_request_key = None
         self.upload_receipts = []
         self.response_statuses = {}
+        self.email_verification_handler = None
+        self.email_continuation_used = False
 
     def arm_submission(self, url):
         """Count and persist the operator's final submit intent BEFORE the click."""
@@ -231,6 +255,12 @@ class SubmissionMonitor:
             try:
                 payload=request_json(request.post_data_buffer)
                 linkedin_job=linkedin_submit_job_id(payload)
+                greenhouse_job=greenhouse_submit_job(request.url,request.method,request.post_data_buffer)
+                if greenhouse_job:
+                    expected=greenhouse_job_id(self.store.get(self.attempt_id)['job_url'])
+                    if not self.armed_request_key or expected!=greenhouse_job:
+                        self.blocked_request=clean_url(request.url)
+                        raise SafetyError('Greenhouse final request has no armed click or targets a different job')
                 if linkedin_job is not None:
                     expected=job_key(self.store.get(self.attempt_id)['job_url'])
                     if not self.armed_request_key or expected!='linkedin:'+linkedin_job:
@@ -264,6 +294,7 @@ class SubmissionMonitor:
             path = urlsplit(request.url).path.lower()
             host = (urlsplit(request.url).hostname or "").lower()
             telemetry = ((host.endswith("linkedin.com") and path.startswith("/li/track"))
+                         or (host=='c.spl.greenhouse.io' and path=='/com.snowplowanalytics.snowplow/tp2')
                          or (host=='csp.withgoogle.com' and path.startswith('/csp/'))) or any(host == suffix or host.endswith("." + suffix) for suffix in (
                 "google-analytics.com", "googletagmanager.com", "segment.io", "segment.com", "sentry.io",
                 "datadoghq.com", "browser-intake-datadoghq.com", "fullstory.com", "hotjar.com", "mixpanel.com", "amplitude.com",
@@ -343,6 +374,11 @@ class SubmissionMonitor:
                         body.get("error") or body.get("errors")
                     ):
                         self.rejected_responses.add(key)
+                    if (isinstance(body,dict) and response.status==428 and body.get('code')=='captcha-failed'
+                            and body.get('security_code_recipient')
+                            and greenhouse_submit_job(response.url,response.request.method,response.request.post_data_buffer)):
+                        self.store.event(self.attempt_id,'greenhouse_email_precondition',{
+                            'request_key':key,'code':'captcha-failed','recipient_present':True})
                 except Exception:
                     self.rejected_responses.add(key)
             self.store.response(key, response.status)
@@ -366,6 +402,7 @@ class SubmissionMonitor:
                         # old Locator again would otherwise wait for it to reappear.
                         snapshot = await frame.locator('body').evaluate('''body=>({
                             text:body.innerText.slice(0,50000),
+                            email_verification:!!body.querySelector('.email-verification')&&[...body.querySelectorAll('[id^="security-input-"]')].filter(e=>e.getClientRects().length).length===8,
                             challenge:[...body.querySelectorAll('iframe[src*="hcaptcha"], iframe[src*="recaptcha"], [data-captcha-challenge]')].some(e=>{
                                 const style=getComputedStyle(e),box=e.getBoundingClientRect();
                                 if(style.visibility==='hidden'||style.visibility==='collapse'||box.height<=150||box.width<=150)return false;
@@ -388,7 +425,8 @@ class SubmissionMonitor:
         for i, page in enumerate(page for ctx in self.contexts for page in ctx.pages):
             try:
                 if is_portal(page.url) or any(is_portal(frame.url) for frame in page.frames):
-                    await page.screenshot(path=str(self.directory / f"{prefix}-{i}.png"), timeout=5000)
+                    await page.screenshot(path=str(self.directory / f"{prefix}-{i}.png"), timeout=5000,
+                                          mask=[page.locator('[id^="security-input-"],input[autocomplete="one-time-code"]')])
             except Exception as error:
                 self.store.event(self.attempt_id, "capture_error",
                                  {"stage": "screenshot", "error": str(error)[:300]})
@@ -416,7 +454,7 @@ class SubmissionMonitor:
             return 'confirmed', 'Successful submit response AND portal confirmation'
         return None
 
-    async def wait_for_intervention(self, message):
+    async def wait_for_intervention(self, message, *, allow_email_transition=True):
         """Keep observing the SAME attempt while the human works on the challenge."""
         waiting = asyncio.create_task(self.store.wait_for_human(self.attempt_id, message, self.cancel))
         try:
@@ -432,6 +470,8 @@ class SubmissionMonitor:
                     self.store.event(self.attempt_id, 'human_hold_portal_result', {'state': outcome[0]})
                     await self.finish(*outcome)
                     return views
+                if allow_email_transition and any(view.get('email_verification') for view in views):
+                    return views
                 await asyncio.sleep(0.5)
             await waiting
             return await self.observe()
@@ -442,6 +482,31 @@ class SubmissionMonitor:
                     await waiting
                 except asyncio.CancelledError:
                     pass
+
+    async def continue_email_verification(self):
+        if self.email_continuation_used:
+            raise SafetyError('Email-verification continuation already attempted; do not repeat')
+        if self.response_tasks:
+            await asyncio.gather(*list(self.response_tasks),return_exceptions=True)
+        parent_directory=self.directory
+        child=self.store.continue_email_verification(self.attempt_id)
+        self.attempt_id=child;self.directory=self.store.directory/'evidence'/child
+        for filename in ('external-review.json','external-review.png'):
+            path=parent_directory/filename
+            if path.exists():shutil.copy2(path,self.directory/('parent-'+filename))
+        self.requests.clear();self.rejected_responses.clear();self.armed_request_key=None
+        self.capture_number=0;self.email_continuation_used=True
+
+    async def handle_email_verification(self, views, agent=None):
+        if self.email_continuation_used or not any(view.get('email_verification') for view in views):return False
+        await self.capture('email-verification-hold')
+        if self.email_verification_handler:
+            await self.email_verification_handler()
+            if not self.terminal:await self.guard(agent)
+        else:
+            await self.finish('uncertain','Email verification required; no supported continuation handler. Do not resend')
+        if self.terminal and agent:agent.stop()
+        return True
 
     async def guard(self, agent=None):
         if self.terminal:
@@ -460,6 +525,7 @@ class SubmissionMonitor:
             if agent:
                 agent.stop()
             return
+        if await self.handle_email_verification(views,agent):return
         if any(view["challenge"] for view in views):
             await self.capture("human-hold")
             views = await self.wait_for_intervention("Resolva o CAPTCHA da candidatura aberta")
@@ -469,10 +535,11 @@ class SubmissionMonitor:
                 if agent:
                     agent.stop()
                 return
+            if await self.handle_email_verification(views,agent):return
         sends = self.store.submissions(self.attempt_id)
         if sends:
             # Once any send was attempted, the model never receives another action.
-            for _ in range(20):
+            for _ in range(60):
                 if self.cancel and self.cancel.get("cancel_requested"):
                     raise asyncio.CancelledError()
                 views = await self.observe()
@@ -480,6 +547,7 @@ class SubmissionMonitor:
                 if outcome:
                     await self.finish(*outcome)
                     break
+                if await self.handle_email_verification(views,agent):return
                 if any(view["challenge"] for view in views):
                     return await self.guard(agent)
                 await asyncio.sleep(0.5)

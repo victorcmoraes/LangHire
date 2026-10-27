@@ -5,6 +5,16 @@ import pytest
 from core.application_safety import AttemptStore, SafetyError
 
 
+@pytest.mark.parametrize('status,proof,finalized',[(200,True,False),(428,False,False),(428,True,True)])
+def test_email_continuation_never_reopens_ordinary_or_unproven_attempts(tmp_path,status,proof,finalized):
+    store=AttemptStore(tmp_path);aid=store.begin('https://job-boards.greenhouse.io/fixture/jobs/123')
+    store.intent(aid,'parent-send','https://boards.greenhouse.io/fixture/jobs/123');store.response('parent-send',status)
+    if proof:store.event(aid,'greenhouse_email_precondition',{'request_key':'parent-send','code':'captcha-failed','recipient_present':True})
+    if finalized:store.transition(aid,'uncertain','Session lost; never reconstruct the challenge')
+    with pytest.raises(SafetyError):store.continue_email_verification(aid)
+    assert len(store.list())==1 and len(store.submissions(aid))==1
+
+
 @pytest.mark.parametrize('proof,receipt,allowed',[(False,False,False),(True,True,False),(True,False,True)])
 def test_only_operator_audited_never_forwarded_probe_can_be_reconciled(tmp_path,proof,receipt,allowed):
     store=AttemptStore(tmp_path);aid=store.begin('https://www.linkedin.com/jobs/view/123/')

@@ -187,6 +187,37 @@ class AttemptStore:
         with self.db() as db:
             db.execute("UPDATE submissions SET http_status=? WHERE request_key=?", (status, request_key))
 
+    def continue_email_verification(self, attempt_id):
+        """A new counted attempt only after GH explicitly requires email verification.
+
+        Ordinary uncertain attempts and CAPTCHA failures cannot use this path.
+        The original HTTP 428 and its daily charge are preserved.
+        """
+        child=uuid.uuid4().hex;directory=self.directory/'evidence'/child
+        with self.db() as db:
+            parent=db.execute('SELECT * FROM attempts WHERE id=?',(attempt_id,)).fetchone()
+            sends=db.execute('SELECT * FROM submissions WHERE attempt_id=?',(attempt_id,)).fetchall()
+            proofs=[json.loads(r[0]) for r in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='greenhouse_email_precondition'",(attempt_id,))]
+            parsed=urlsplit(parent['job_url']) if parent else None
+            if (not parent or parent['state'] not in ACTIVE or not parsed
+                    or parsed.hostname not in ('boards.greenhouse.io','job-boards.greenhouse.io')
+                    or not re.fullmatch(r'/[\w-]+/jobs/\d+/?',parsed.path)
+                    or len(sends)!=1 or sends[0]['http_status']!=428
+                    or not any(p.get('request_key')==sends[0]['request_key'] and p.get('code')=='captcha-failed' and p.get('recipient_present') is True for p in proofs)):
+                raise SafetyError('No explicit live Greenhouse email precondition; do not repeat the send')
+            protected=db.execute("SELECT job_url FROM attempts WHERE id!=? AND state IN ('running','awaiting_human','submitted','uncertain','confirmed')",(attempt_id,)).fetchall()
+            if any(job_key(row['job_url'])==job_key(parent['job_url']) for row in protected):
+                raise SafetyError('Another protected attempt exists for this job')
+            directory.mkdir(parents=True)
+            db.execute("UPDATE attempts SET state='blocked',message=?,updated_at=? WHERE id=?",
+                       ('Portal explicitly required email verification before accepting application; continued in '+child,now(),attempt_id))
+            db.execute('INSERT INTO attempts VALUES (?,?,?,?,?,?,0,?,?)',
+                       (child,parent['job_url'],'running',now(),now(),'Same live form; email-verification continuation',os.getpid(),str(directory)))
+            for aid,kind,payload in ((attempt_id,'verification_continued',{'child_attempt':child}),
+                                     (child,'verification_parent',{'parent_attempt':attempt_id,'prior_http_status':428})):
+                db.execute('INSERT INTO events(attempt_id,at,kind,payload) VALUES(?,?,?,?)',(aid,now(),kind,json.dumps(payload)))
+        return child
+
     def recover(self):
         """Called ONLY under the exclusive worker lease, never on API polling."""
         recovered = []

@@ -63,6 +63,20 @@ def test_direct_facts_bypass_model_but_never_infer_years(tmp_path):
     assert 'pending' in b.resolve(field(),j)
 
 
+def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_english(tmp_path):
+    source={'facts':[{'id':k,'value':v,'source':'user'} for k,v in {
+        'identity.cpf':'12345678909','nationality':'Brazilian','level.english':'Proficient','location.country':'Brazil'}.items()]}
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps(source));b=AnswerBook(tmp_path)
+    br={'url':'br-job','eligibility_country':'BR','form_language':'pt'}
+    assert b.resolve({'label':'CPF','type':'text','options':[]},br)['value']=='12345678909'
+    assert b.resolve({'label':'Nacionalidade','type':'text','options':[]},br)['value']=='Brasileira'
+    q={'label':'Are you a citizen or permanent resident of the country where this position is based?','type':'select-one','options':[{'text':'Yes','value':'y'},{'text':'No','value':'n'}]}
+    assert b.resolve(q,br)['value']=='y'
+    assert 'pending' in b.resolve(q,dict(br,url='us-job',eligibility_country='US'))
+    language={'label':'English Level','type':'select-one','options':[{'text':'Full professional proficiency','value':'pro'},{'text':'Native or bilingual proficiency','value':'native'}]}
+    assert b.resolve(language,br)['value']=='pro'
+
+
 def test_profile_edits_replace_affected_facts_without_importing_untouched_defaults(tmp_path):
     book(tmp_path)
     sync_profile_facts(tmp_path,{'email':'test@example.invalid','years_of_experience':0},

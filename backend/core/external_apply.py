@@ -234,25 +234,35 @@ class LeverAdapter:
 async def execute_external(job,data,resume,execution='review',status=None,lease_held=False):
     from contextlib import nullcontext
     data=Path(data);job=dict(job,url=canonical_ats(job['url']),eligibility_country='BR',form_language='en')
+    contact=data/'pending-contact-verification.json'
+    if execution=='submit' and contact.exists() and json.loads(contact.read_text(encoding='utf-8')).get('active'):
+        raise SafetyError('Candidate email confirmation pending; no additional send')
     if execution=='submit' and platform_hold(data,job['platform']):
         raise SafetyError('Platform submissions paused for verification diagnosis: '+job['platform'])
     with (nullcontext() if lease_held else FileLock(str(data/'application-worker.lock'),timeout=0)):
         store=AttemptStore(data);store.recover();aid=store.begin(job['url'])
+        if job.get('external_qualification'):store.event(aid,'external_qualification',job['external_qualification'])
         try:
-            if job['platform']!='lever':raise SafetyError('Greenhouse preflight/required personal facts pending; not using a generic agent')
+            if job['platform'] not in ('lever','greenhouse'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
+            adapter_type=LeverAdapter
+            if job['platform']=='greenhouse':
+                from .greenhouse_apply import GreenhouseAdapter
+                adapter_type=GreenhouseAdapter
             async with persistent_browser(data) as session:
                 monitor=SubmissionMonitor(store,aid,cancel=status)
                 adapter=None
                 try:
                     await monitor.attach(session)
-                    adapter=LeverAdapter(monitor.contexts[0].pages[0],job,data,aid,monitor,status)
+                    adapter=adapter_type(monitor.contexts[0].pages[0],job,data,aid,monitor,status)
                     await adapter.run(resume,execution)
                 except BaseException as error:
+                    aid=monitor.attempt_id
                     store.event(aid,'external_error',{'type':type(error).__name__,'message':str(error)[:700]})
                     await monitor.capture('external-failure')
                     if store.get(aid)['state'] in ACTIVE:store.transition(aid,'uncertain' if store.submissions(aid) else 'pending',str(error)[:700])
                     if isinstance(error,asyncio.CancelledError):raise
                 finally:
+                    aid=monitor.attempt_id
                     if adapter:store.event(aid,'answer_metrics',adapter.metrics)
                     await monitor.close()
         except Exception as error:
