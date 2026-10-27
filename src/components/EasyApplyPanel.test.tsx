@@ -14,6 +14,26 @@ beforeEach(()=>{
  vi.mocked(api.getApplyStatus).mockResolvedValue({running:false} as never);
 });
 describe('Easy Apply controls',()=>{
+ it('confirms salary units next to the answer before saving',async()=>{
+  vi.mocked(api.getEasyAnswers).mockResolvedValue([{id:1,question:'Salary?',state:'pending',answer:null,proposal:null,context:{country:'BR'},refs:[],jobs:['job'],field:{type:'text'}}]);
+  vi.mocked(api.approveEasyAnswer).mockResolvedValue({});
+  render(<EasyAnswers/>);
+  await userEvent.type(await screen.findByRole('textbox',{name:'Salary?'}),'7000');
+  const confirm=screen.getByRole('button',{name:'Confirmar e reutilizar'});
+  expect(confirm).toBeDisabled();
+  await userEvent.type(screen.getByRole('textbox',{name:'Moeda: Salary?'}),'BRL');
+  await userEvent.selectOptions(screen.getByRole('combobox',{name:'Período: Salary?'}),'monthly');
+  await userEvent.click(confirm);
+  await waitFor(()=>expect(api.approveEasyAnswer).toHaveBeenCalledWith(1,'7000',{currency:'BRL',period:'monthly'}));
+ });
+ it('shows model abstention as missing information instead of an API error',async()=>{
+  vi.mocked(api.getEasyAnswers).mockResolvedValue([{id:1,question:'Years?',state:'pending',answer:null,proposal:null,context:{},refs:[],jobs:['job'],field:{type:'number'}}]);
+  vi.mocked(api.proposeEasyAnswer).mockResolvedValue({supported:false,message:'Faltam fatos no cadastro.'});
+  render(<EasyAnswers/>);
+  await userEvent.click(await screen.findByRole('button',{name:'Propor com 8b'}));
+  expect(await screen.findByRole('status')).toHaveTextContent('Faltam fatos no cadastro.');
+  expect(api.approveEasyAnswer).not.toHaveBeenCalled();
+ });
  it('does not use a model proposal until the human approves it',async()=>{
   vi.mocked(api.getEasyAnswers).mockResolvedValue([{id:1,question:'Availability?',state:'proposed',answer:null,proposal:'Immediate',context:{country:'BR'},refs:['availability'],jobs:['job'],field:{type:'text'}}]);
   vi.mocked(api.approveEasyAnswer).mockResolvedValue({});

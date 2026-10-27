@@ -9,9 +9,13 @@ function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: ()
   const [value, setValue] = useState<string | boolean | number>(question.proposal ?? question.answer ?? (question.field.type === 'checkbox' ? false : ''));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [currency, setCurrency] = useState(question.context.currency || '');
+  const [period, setPeriod] = useState(question.context.period || '');
+  const isSalary = /salary|salari|remunera|pretensao|renda|taxa hora/.test(question.question.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
   useEffect(() => { setValue(question.proposal ?? question.answer ?? (question.field.type==='checkbox'?false:'')); }, [question.proposal,question.answer,question.field.type]);
   const perform = async (action: () => Promise<unknown>) => {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try { await action(); refresh(); } catch (e) {setError(String(e));} finally {setBusy(false);}
   };
   return <div className="border border-border rounded-lg p-3 space-y-2">
@@ -22,10 +26,18 @@ function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: ()
       <option value="">Selecione</option>{question.field.options.map(o=><option key={o.value} value={o.value}>{o.text}</option>)}
     </select> : question.field.type==='checkbox' ? <label><input type="checkbox" checked={value===true} onChange={e=>setValue(e.target.checked)}/> Sim</label>
       : <input aria-label={question.question} className="input-base" value={String(value)} onChange={e=>setValue(e.target.value)}/>}
-    <div className="flex gap-3"><button className="btn-secondary mr-2" disabled={busy} onClick={()=>void perform(()=>proposeEasyAnswer(question.id))}>Propor com 8b</button>
-      <button className="btn-secondary mr-2" disabled={busy || value===''} onClick={()=>void perform(()=>approveEasyAnswer(question.id,value))}>Confirmar e reutilizar</button></div>
+    {isSalary && <div className="flex gap-3">
+      <label>Moeda desta resposta<input aria-label={`Moeda: ${question.question}`} className="input-base" placeholder="BRL, USD..." maxLength={3} value={currency} readOnly={!!question.context.currency} onChange={e=>setCurrency(e.target.value.toUpperCase())}/></label>
+      <label>Período desta resposta<select aria-label={`Período: ${question.question}`} className="input-base" value={period} disabled={!!question.context.period} onChange={e=>setPeriod(e.target.value)}>
+        <option value="">Selecione</option><option value="monthly">Mensal</option><option value="annual">Anual</option><option value="hourly">Por hora</option>
+      </select></label>
+    </div>}
+    {isSalary && (!currency || !period) && <p className="text-sm">Confirma a moeda e o período para salvar este valor no contexto certo.</p>}
+    <div className="flex gap-3"><button className="btn-secondary mr-2" disabled={busy} onClick={()=>void perform(async()=>{const result=await proposeEasyAnswer(question.id);if(result.supported===false)setNotice(result.message || 'Faltam fatos no cadastro. Informe a resposta para confirmar.');})}>Propor com 8b</button>
+      <button className="btn-secondary mr-2" disabled={busy || value==='' || (isSalary && (!/^[A-Z]{3}$/.test(currency) || !period))} onClick={()=>void perform(()=>isSalary ? approveEasyAnswer(question.id,value,{currency,period}) : approveEasyAnswer(question.id,value))}>Confirmar e reutilizar</button></div>
     {question.refs.length>0 && <p className="text-xs">Fatos: {question.refs.join(', ')}</p>}
     {error && <p role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
   </div>;
 }
 

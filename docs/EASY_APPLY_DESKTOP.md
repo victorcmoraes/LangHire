@@ -18,6 +18,13 @@ O token do Rust e os dados do backend respeitam o mesmo override. Não é necess
 
 A fila geral externa continua desabilitada. O fluxo Easy Apply não chama o agente genérico nem segue redirecionamentos externos. O modelo não navega nem clica.
 
+No cartão de uma pergunta salarial, confirme a moeda e o período junto do valor.
+Unidades já explícitas na pergunta ficam bloqueadas para edição. Essa confirmação
+vale para a pergunta e as vagas já associadas; não define unidades para outras
+perguntas ou novas vagas. Se faltarem fatos para o 8b propor uma resposta, o app
+informa isso e mantém a pergunta pendente para preenchimento manual. Uma proposta
+com referências ou formato inválidos também permanece sem uso.
+
 ## Implementação e evidências
 
 - Estados do executor: abrir vaga/modal, identificar etapa, resolver/preencher, conferir, avançar, revisar e enviar uma vez.

@@ -78,7 +78,9 @@ async def test_model_with_missing_support_cannot_become_answer(tmp_path,monkeypa
         def __exit__(self,*args):pass
         def read(self):return json.dumps({'message':{'content':json.dumps({'supported':True,'value':99,'refs':['invented']})}}).encode()
     monkeypatch.setattr('urllib.request.urlopen',lambda *a,**k:Response())
-    with pytest.raises(SafetyError):await b.propose(aid,{'ollama':{'model':'qwen3:8b'}})
+    result=await b.propose(aid,{'ollama':{'model':'qwen3:8b'}})
+    assert result['supported'] is False
+    assert result['reason']=='invalid_proposal'
     assert b.list()[0]['state']=='pending'
 
 
@@ -94,3 +96,35 @@ async def test_valid_model_proposal_still_requires_human_approval(tmp_path,monke
     assert 'pending' in b.resolve(q,j)
     b.approve(aid,'test@example.invalid')
     assert b.resolve(q,j)['source']=='cache'
+
+
+def test_salary_units_can_be_confirmed_on_pending_question_without_cross_job_leak(tmp_path):
+    b=book(tmp_path);q=field('Salary');j={'url':'job','eligibility_country':'BR'}
+    aid=b.resolve(q,j)['pending']
+    with pytest.raises(SafetyError):b.approve(aid,7000)
+    b.approve(aid,7000,{'currency':'BRL','period':'monthly'})
+    assert b.resolve(q,j)['value']==7000
+    assert 'pending' in b.resolve(q,dict(j,url='other-job'))
+    assert 'pending' in b.resolve(q,dict(j,salary_currency='USD',salary_period='monthly'))
+
+
+def test_salary_context_cannot_override_explicit_units_or_omit_income_units(tmp_path):
+    b=book(tmp_path);j={'url':'job','salary_currency':'USD','salary_period':'annual'}
+    aid=b.resolve(field('Salary'),j)['pending']
+    with pytest.raises(SafetyError):b.approve(aid,7000,{'currency':'BRL','period':'monthly'})
+    income=b.resolve(field('Renda mensal atual'),{'url':'job'})['pending']
+    with pytest.raises(SafetyError):b.approve(income,7000)
+    b.approve(income,7000,{'currency':'BRL','period':'monthly'})
+
+
+async def test_model_abstention_is_normal_result_and_preserves_pending(tmp_path,monkeypatch):
+    b=book(tmp_path);aid=b.resolve(field(),{'url':'job'})['pending']
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self):return json.dumps({'message':{'content':json.dumps({'supported':False,'value':None,'refs':[]})}}).encode()
+    monkeypatch.setattr('urllib.request.urlopen',lambda *a,**k:Response())
+    result=await b.propose(aid,{'ollama':{'model':'qwen3:8b'}})
+    assert result['supported'] is False
+    assert result['reason']=='missing_facts'
+    assert b.list()[0]['state']=='pending'

@@ -18,6 +18,15 @@ def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def answer_key(field, context):
+    return digest({'question': normalized(field['label']), 'type': field['type'],
+                   'options': field.get('options', []), 'context': context})
+
+
+def salary_question(question):
+    return bool(re.search(r'salary|salari|remunera|pretensao|renda|taxa hora', normalized(question)))
+
+
 def sync_profile_facts(directory, before, after):
     """Only explicit profile edits become facts; untouched UI defaults never do."""
     from filelock import FileLock
@@ -75,7 +84,10 @@ class AnswerBook:
               answer TEXT, proposal TEXT, refs TEXT NOT NULL DEFAULT '[]', facts_version TEXT,
               source TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL);
               CREATE TABLE IF NOT EXISTS easy_answer_jobs (
-              answer_id INTEGER NOT NULL, job_url TEXT NOT NULL, UNIQUE(answer_id,job_url));''')
+              answer_id INTEGER NOT NULL, job_url TEXT NOT NULL, UNIQUE(answer_id,job_url));
+              CREATE TABLE IF NOT EXISTS easy_salary_context (
+              base_key TEXT NOT NULL, job_url TEXT NOT NULL, context TEXT NOT NULL,
+              PRIMARY KEY(base_key,job_url));''')
 
     def context(self, question, job):
         q = normalized(question)
@@ -132,11 +144,15 @@ class AnswerBook:
         if not field.get('label','').strip():return {'pending':'unsupported-unlabeled-control','source':'pending'}
         context = self.context(field['label'], job)
         if field.get('profile_text'):context['profile_snapshot']=digest(field['profile_text'])
+        base_key = answer_key(field, context)
+        with self.store.db() as db:
+            override = db.execute('SELECT context FROM easy_salary_context WHERE base_key=? AND job_url=?',
+                                  (base_key,job['url'])).fetchone()
+        if override: context.update(json.loads(override[0]))
         answer = self.direct(field, context)
         if answer: return answer
         # Option sets and units are part of identity; fuzzy matching cannot approve answers.
-        key = digest({'question': normalized(field['label']), 'type': field['type'],
-                      'options': field.get('options', []), 'context': context})
+        key = answer_key(field, context)
         with self.store.db() as db:
             row = db.execute('SELECT * FROM easy_answers WHERE key=?', (key,)).fetchone()
             if row and row['state'] == 'approved':
@@ -163,14 +179,31 @@ class AnswerBook:
                     row['state'] = 'stale'
         return [r for r in rows if r['question'].strip() and (r['field'].get('required',True) or r['state'] in ('approved','proposed','stale'))]
 
-    def approve(self, answer_id, value):
+    def approve(self, answer_id, value, salary_context=None):
         with self.store.db() as db:
             row = db.execute('SELECT * FROM easy_answers WHERE id=?', (answer_id,)).fetchone()
             if not row or not valid_value(json.loads(row['field']), value):
                 raise SafetyError('Answer does not match field type/options')
             context=json.loads(row['context'])
-            if re.search(r'salary|salari|remunera|pretensao',normalized(row['question'])) and (not context.get('currency') or not context.get('period')):
-                raise SafetyError('Confirm salary currency and period in the job qualification before approving this answer')
+            if salary_context is not None:
+                if not salary_question(row['question']) or not isinstance(salary_context,dict):
+                    raise SafetyError('Salary context is only supported for salary questions')
+                currency,period=salary_context.get('currency',''),salary_context.get('period','')
+                if not re.fullmatch('[A-Z]{3}',currency) or period not in ('monthly','annual','hourly'):
+                    raise SafetyError('Confirm currency and salary period')
+                if any(context.get(k) and context[k]!=v for k,v in [('currency',currency),('period',period)]):
+                    raise SafetyError('Salary units conflict with the question; keep the displayed units')
+                updated=dict(context,currency=currency,period=period)
+                key=answer_key(json.loads(row['field']),updated)
+                other=db.execute('SELECT id FROM easy_answers WHERE key=? AND id!=?',(key,answer_id)).fetchone()
+                if other: raise SafetyError('An answer already exists for these units; use that question')
+                for job in db.execute('SELECT job_url FROM easy_answer_jobs WHERE answer_id=?',(answer_id,)).fetchall():
+                    db.execute('INSERT OR REPLACE INTO easy_salary_context VALUES(?,?,?)',
+                               (row['key'],job[0],json.dumps({'currency':currency,'period':period})))
+                db.execute('UPDATE easy_answers SET key=?,context=? WHERE id=?',(key,json.dumps(updated),answer_id))
+                context=updated
+            if salary_question(row['question']) and (not context.get('currency') or not context.get('period')):
+                raise SafetyError('Confirm currency and salary period alongside this answer')
             refs = json.loads(row['refs'])
             if row['proposal'] is not None and refs and row['facts_version'] != self.reference_version(refs):
                 raise SafetyError('Facts changed; generate a fresh proposal or supply an explicit new answer')
@@ -200,11 +233,15 @@ class AnswerBook:
                 return json.loads(json.load(response)['message']['content'])
         self.store.event('answer:' + str(answer_id), 'model_call', {'model': payload['model']})
         result = await asyncio.to_thread(call)
+        if isinstance(result,dict) and result.get('supported') is False:
+            return {'supported':False,'reason':'missing_facts',
+                    'message':'O cadastro não tem fatos suficientes para esta resposta. Informe o dado e confirme; o modelo não vai inventar.'}
         refs = result.get('refs', [])
         if (result.get('supported') is not True or not isinstance(refs, list) or not refs
                 or any(not isinstance(r, str) or r not in self.facts for r in refs)
                 or not valid_value(row['field'], result.get('value'))):
-            raise SafetyError('Model proposal unsupported or invalid; question remains pending')
+            return {'supported':False,'reason':'invalid_proposal',
+                    'message':'A proposta do modelo não passou na validação dos fatos ou do formato. Informe a resposta manualmente; a pergunta continua pendente.'}
         with self.store.db() as db:
             db.execute("UPDATE easy_answers SET proposal=?,refs=?,facts_version=?,state='proposed',updated_at=? WHERE id=?",
                        (json.dumps(result['value']), json.dumps(refs), self.reference_version(refs), now(), answer_id))

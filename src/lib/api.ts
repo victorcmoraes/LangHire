@@ -270,8 +270,8 @@ export const getEasyReviews = () => request<EasyReview[]>("/easy/reviews");
 export const getEasyFacts = () => request<Record<string, {value: unknown}>>("/easy/facts");
 export const getEasyChannel = () => request<{suspended: number; reason: string}>("/easy/channel");
 export const verifyEasySession = () => request<{success: boolean}>("/easy/channel/resume", {method: "POST"});
-export const proposeEasyAnswer = (id: number) => request(`/easy/answers/${id}/propose`, {method: "POST"});
-export const approveEasyAnswer = (id: number, value: string | boolean | number) => request(`/easy/answers/${id}/approve`, {method: "POST",body: JSON.stringify({value})});
+export const proposeEasyAnswer = (id: number) => request<{supported?: boolean; message?: string}>(`/easy/answers/${id}/propose`, {method: "POST"});
+export const approveEasyAnswer = (id: number, value: string | boolean | number, salary_context?: {currency: string; period: string}) => request(`/easy/answers/${id}/approve`, {method: "POST",body: JSON.stringify({value, ...(salary_context ? {salary_context} : {})})});
 export const qualifyEasyJob = (job_url: string, evidence: string, fact_refs: string[], language: string, currency: string, period: string) =>
   request("/easy/qualify", {method: "POST",body: JSON.stringify({job_url,evidence,fact_refs,country:"BR",language,currency,period})});
 

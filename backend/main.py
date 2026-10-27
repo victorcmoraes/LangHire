@@ -2017,7 +2017,7 @@ async def approve_easy_answer(answer_id: int, body: dict):
     from backend.core.easy_answers import AnswerBook
     from backend.core.application_safety import SafetyError
     try:
-        result = AnswerBook(get_data_dir()).approve(answer_id, body.get('value'))
+        result = AnswerBook(get_data_dir()).approve(answer_id, body.get('value'), body.get('salary_context'))
         from backend.core.easy_service import qualification_current
         from core.shared_config import read_jobs, update_job
         from backend.core.easy_apply import EasyStore
