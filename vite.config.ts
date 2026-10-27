@@ -18,7 +18,7 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ["**/backend/**"],
+      ignored: ["**/backend/**", "**/.local/**"],
     },
   },
   test: {

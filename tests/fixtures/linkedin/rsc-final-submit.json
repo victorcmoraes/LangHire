@@ -1,0 +1,270 @@
+{
+  "requestId": "com.linkedin.sdui.requests.jobseeker.easyapply.submit",
+  "serverRequest": {
+    "requestId": "com.linkedin.sdui.requests.jobseeker.easyapply.submit",
+    "requestedArguments": {
+      "$type": "[string]",
+      "requestedStateKeys": [
+        {
+          "key": {
+            "value": {
+              "$case": "[string]",
+              "id": "[string]"
+            }
+          }
+        },
+        {
+          "key": {
+            "value": {
+              "$case": "[string]",
+              "id": "[string]"
+            }
+          }
+        },
+        {
+          "key": {
+            "value": {
+              "$case": "[string]",
+              "id": "[string]"
+            }
+          }
+        }
+      ],
+      "payload": {
+        "jobId": "123",
+        "questionFieldsList": [
+          {
+            "key": "[string]",
+            "namespace": "[string]"
+          },
+          {
+            "key": "[string]",
+            "namespace": "[string]"
+          },
+          {
+            "key": "[string]",
+            "namespace": "[string]"
+          }
+        ],
+        "questionListFieldsList": [],
+        "questionDateFieldsList": [],
+        "followCompany": {
+          "key": "[string]",
+          "namespace": "[string]"
+        },
+        "trackingCode": "[string]",
+        "companyName": "[string]",
+        "canonicalMemberId": "[string]",
+        "isSubmittingBinding": {
+          "key": "[string]",
+          "namespace": "[string]"
+        },
+        "topChoiceInfo": {
+          "isEligibleToSeeTopChoice": false
+        }
+      },
+      "requestMetadata": {
+        "$type": "[string]"
+      }
+    },
+    "onClientRequestFailureAction": {
+      "actions": [
+        {
+          "$type": "[string]",
+          "value": {
+            "state": {
+              "key": {
+                "key": {
+                  "value": {
+                    "$case": "[string]",
+                    "id": "[string]"
+                  }
+                }
+              },
+              "value": {
+                "$case": "[string]",
+                "booleanValue": false
+              }
+            }
+          }
+        },
+        {
+          "$type": "[string]",
+          "value": {
+            "duration": "[string]",
+            "key": "[string]",
+            "presetToast": {
+              "category": "[string]",
+              "text": {
+                "_payload": {
+                  "status": "[string]",
+                  "value": "[string]",
+                  "reason": {
+                    "_moduleLoading": null,
+                    "_chunks": {},
+                    "_stringDecoder": {},
+                    "_closed": true,
+                    "_closedReason": {},
+                    "_allowPartialStream": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "isApfcEnabled": false,
+    "isStreaming": false,
+    "rumPageKey": "[string]"
+  },
+  "states": [
+    {
+      "key": "[string]",
+      "namespace": "[string]",
+      "value": "[string]",
+      "originalProtoCase": "[string]",
+      "protoKey": {
+        "$type": "[string]",
+        "value": {
+          "$case": "[string]",
+          "id": "[string]"
+        }
+      }
+    },
+    {
+      "key": "[string]",
+      "namespace": "[string]",
+      "value": "[string]",
+      "originalProtoCase": "[string]",
+      "protoKey": {
+        "$type": "[string]",
+        "value": {
+          "$case": "[string]",
+          "id": "[string]"
+        }
+      }
+    },
+    {
+      "key": "[string]",
+      "namespace": "[string]",
+      "value": "[string]",
+      "originalProtoCase": "[string]",
+      "protoKey": {
+        "$type": "[string]",
+        "value": {
+          "$case": "[string]",
+          "id": "[string]"
+        }
+      }
+    }
+  ],
+  "requestedArguments": {
+    "$type": "[string]",
+    "requestedStateKeys": [
+      {
+        "key": {
+          "value": {
+            "$case": "[string]",
+            "id": "[string]"
+          }
+        }
+      },
+      {
+        "key": {
+          "value": {
+            "$case": "[string]",
+            "id": "[string]"
+          }
+        }
+      },
+      {
+        "key": {
+          "value": {
+            "$case": "[string]",
+            "id": "[string]"
+          }
+        }
+      }
+    ],
+    "payload": {
+      "jobId": "123",
+      "questionFieldsList": [
+        {
+          "key": "[string]",
+          "namespace": "[string]"
+        },
+        {
+          "key": "[string]",
+          "namespace": "[string]"
+        },
+        {
+          "key": "[string]",
+          "namespace": "[string]"
+        }
+      ],
+      "questionListFieldsList": [],
+      "questionDateFieldsList": [],
+      "followCompany": {
+        "key": "[string]",
+        "namespace": "[string]"
+      },
+      "trackingCode": "[string]",
+      "companyName": "[string]",
+      "canonicalMemberId": "[string]",
+      "isSubmittingBinding": {
+        "key": "[string]",
+        "namespace": "[string]"
+      },
+      "topChoiceInfo": {
+        "isEligibleToSeeTopChoice": false
+      }
+    },
+    "requestMetadata": {
+      "$type": "[string]"
+    },
+    "states": [
+      {
+        "key": "[string]",
+        "namespace": "[string]",
+        "value": "[string]",
+        "originalProtoCase": "[string]",
+        "protoKey": {
+          "$type": "[string]",
+          "value": {
+            "$case": "[string]",
+            "id": "[string]"
+          }
+        }
+      },
+      {
+        "key": "[string]",
+        "namespace": "[string]",
+        "value": "[string]",
+        "originalProtoCase": "[string]",
+        "protoKey": {
+          "$type": "[string]",
+          "value": {
+            "$case": "[string]",
+            "id": "[string]"
+          }
+        }
+      },
+      {
+        "key": "[string]",
+        "namespace": "[string]",
+        "value": "[string]",
+        "originalProtoCase": "[string]",
+        "protoKey": {
+          "$type": "[string]",
+          "value": {
+            "$case": "[string]",
+            "id": "[string]"
+          }
+        }
+      }
+    ],
+    "screenId": "com.linkedin.sdui.flagshipnav.jobs.easyapply.EasyApply",
+    "knownTemplateIds": []
+  }
+}

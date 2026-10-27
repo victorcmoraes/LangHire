@@ -25,7 +25,7 @@ export default function CollectTab({ onJobsChanged }: CollectTabProps) {
   // Collection state
   const [collecting, setCollecting] = useState(false);
   const [collectTitle, setCollectTitle] = useState("");
-  const [collectMaxJobs, setCollectMaxJobs] = useState<number | "">(20);
+  const [collectMaxJobs, setCollectMaxJobs] = useState<number | "">(10);
   const [collectSource, setCollectSource] = useState("linkedin");
   const [availableSources, setAvailableSources] = useState<PluginConfig[]>([]);
   const [collectLog, setCollectLog] = useState<string[]>([]);
@@ -51,14 +51,14 @@ export default function CollectTab({ onJobsChanged }: CollectTabProps) {
         const country = p.country || "US";
         getPlugins(country)
           .then((res) => {
-            if (res.plugins) setAvailableSources(res.plugins);
+            if (res.plugins) setAvailableSources(res.plugins.filter(p=>p.name==='linkedin'));
           })
           .catch(() => {});
       })
       .catch(() => {
         getPlugins()
           .then((res) => {
-            if (res.plugins) setAvailableSources(res.plugins);
+            if (res.plugins) setAvailableSources(res.plugins.filter(p=>p.name==='linkedin'));
           })
           .catch(() => {});
       });

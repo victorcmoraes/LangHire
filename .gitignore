@@ -42,7 +42,7 @@ fonts/
 
 # Lock files
 jobs.json.lock
-uv.lock
+.local/
 
 # ── OS Files ──────────────────────────────────────────────────────────────
 .DS_Store

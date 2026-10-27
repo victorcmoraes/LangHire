@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { EasyAnswers } from "../components/EasyApplyPanel";
 import { Search, Trash2, Merge, Sparkles, Zap, HelpCircle, X } from "lucide-react";
 import { getQAList, getQAStats, updateQA, deleteQA, mergeQA, autoSquashQA, smartSquashQA } from "../lib/api";
 import { trackEvent } from "../lib/analytics";
@@ -158,6 +159,7 @@ export default function QA() {
         </div>
       )}
 
+      <EasyAnswers />
       {/* Question list */}
       {questions.length === 0 ? (
         <div className="card text-center py-16">

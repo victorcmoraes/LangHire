@@ -44,6 +44,8 @@ vi.mock("../../lib/perf", () => ({
 }));
 
 vi.mock("../../lib/api", () => ({
+  getInterventions: vi.fn().mockResolvedValue([]),
+  confirmIntervention: vi.fn(),
   getJobs: vi.fn(),
   startApplying: vi.fn(),
   getApplyStatus: vi.fn(),
@@ -178,7 +180,7 @@ describe("PendingTab", () => {
     await user.click(await screen.findByRole("button", { name: "Got it, Start" }));
     await waitFor(() =>
       expect(mockStartApplying).toHaveBeenCalledWith(
-        expect.objectContaining({ job_url: pendingJob.url, workers: 1, mode: "all" }),
+        expect.objectContaining({ job_url: pendingJob.url, workers: 1, mode: "easy", execution: "review" }),
       ),
     );
   });
@@ -237,7 +239,7 @@ describe("PendingTab", () => {
 
     await waitFor(() =>
       expect(mockStartApplying).toHaveBeenCalledWith(
-        expect.objectContaining({ job_urls: expect.any(Array), workers: 1, mode: "all" }),
+        expect.objectContaining({ job_urls: expect.any(Array), workers: 1, mode: "easy", execution: "review" }),
       ),
     );
   });

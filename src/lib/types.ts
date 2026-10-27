@@ -109,7 +109,7 @@ export interface Job {
   company: string;
   location: string;
   easy_apply: boolean | null;
-  status: "pending" | "in_progress" | "applied" | "failed" | "blocked";
+  status: JobStatus;
   source?: string;
   search_title?: string;
   collected_at?: string;
@@ -268,6 +268,9 @@ export interface CollectionStatus {
 }
 
 export interface ApplyStatus {
+  stage?: string;
+  result?: string;
+  job_url?: string;
   running: boolean;
   mode: string | null;
   workers: number;
@@ -276,7 +279,14 @@ export interface ApplyStatus {
   finished_at: string | null;
 }
 
-export type JobStatus = "pending" | "in_progress" | "applied" | "failed" | "blocked";
+export type JobStatus = "pending" | "in_progress" | "applied" | "failed" | "blocked" | "uncertain";
+
+export interface HumanIntervention {
+  id: string;
+  job_url: string;
+  message: string;
+  acknowledged: number;
+}
 
 export interface JobStats {
   total: number;

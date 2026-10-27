@@ -119,7 +119,7 @@ def test_create_llm_ollama():
     # Trailing slash stripped, and NOT the /v1 OpenAI shim.
     assert llm.host == "http://myhost:11434"
     assert "/v1" not in llm.host
-    assert llm.ollama_options["num_ctx"] == 32768
+    assert llm.ollama_options["num_ctx"] == 16384
     assert llm.ollama_options["num_predict"] == 4096
     assert llm.ollama_options["temperature"] == 0.0
 

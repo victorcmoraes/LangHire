@@ -43,14 +43,14 @@ ADA_CMD: tuple[str, ...] = ()  # Only needed for Amazon internal credential refr
 
 # Load settings from OS data dir (written by desktop app UI) if available
 _settings_file = DATA_DIR / "settings.json"
-_ui_settings = json.loads(_settings_file.read_text()) if _settings_file.exists() else {}
+_ui_settings = json.loads(_settings_file.read_text(encoding="utf-8")) if _settings_file.exists() else {}
 SENSITIVE_DATA = _ui_settings.get("sensitive_data", {"email": "", "password": ""})
 
 # Fall back to profile email if sensitive_data email is blank
 if not SENSITIVE_DATA.get("email", "").strip():
     _profile_file = DATA_DIR / "candidate_profile.json"
     if _profile_file.exists():
-        _profile_data = json.loads(_profile_file.read_text())
+        _profile_data = json.loads(_profile_file.read_text(encoding="utf-8"))
         _profile_email = _profile_data.get("email", "").strip()
         if _profile_email:
             SENSITIVE_DATA["email"] = _profile_email
@@ -93,15 +93,22 @@ def get_memory_store() -> MemoryStore:
 
 def load_json(path: Path, default=None):
     if path.exists():
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     return default if default is not None else []
 
 
 def save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(path)
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    import time
+    for retry in range(6):
+        try:
+            tmp.replace(path)
+            break
+        except PermissionError:
+            if retry==5:raise
+            time.sleep(0.05 * 2**retry)
 
 
 def read_jobs() -> dict:
@@ -114,6 +121,18 @@ def write_jobs(jobs: dict):
     """Write jobs.json with cross-process lock."""
     with FileLock(JOBS_LOCK):
         save_json(JOBS_FILE, jobs)
+
+
+def add_collected_job(job: dict) -> bool:
+    """Merge discovery without overwriting concurrent approvals or protected records."""
+    with FileLock(JOBS_LOCK):
+        jobs=load_json(JOBS_FILE,{})
+        match=re.search(r'/jobs/view/(\d+)',job['url'])
+        if job['url'] in jobs or (match and any(re.search(r'/jobs/view/'+match[1]+r'(?:/|\?|$)',url) for url in jobs)):
+            return False
+        jobs[job['url']]=job
+        save_json(JOBS_FILE,jobs)
+        return True
 
 
 def update_job(url: str, **fields):
@@ -166,8 +185,13 @@ async def credential_refresh_loop(interval_minutes: int = 14):
 
 def get_llm() -> ChatAWSBedrock:
     """Create a fresh LLM client with current credentials."""
-    session = boto3.Session(profile_name=AWS_PROFILE, region_name=AWS_REGION)
-    return ChatAWSBedrock(model=MODEL_ID, session=session)
+    try:
+        from core.config import load_llm_settings
+        from core.llm_factory import create_llm
+    except ImportError:
+        from backend.core.config import load_llm_settings
+        from backend.core.llm_factory import create_llm
+    return create_llm(load_llm_settings())
 
 
 def normalize_question(q: str) -> str:
