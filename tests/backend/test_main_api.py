@@ -31,6 +31,32 @@ TOKEN = main._API_TOKEN
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
+class TestEasyApplyBoundary:
+    def test_external_mode_disabled(self, auth_client,monkeypatch):
+        monkeypatch.setattr(main,'_apply_status',{'running':False})
+        assert auth_client.post('/apply/start',json={'mode':'external'}).status_code==409
+
+    def test_submit_requires_matching_review_and_three_distinct_jobs(self, auth_client,monkeypatch):
+        monkeypatch.setattr(main,'_apply_status',{'running':False})
+        monkeypatch.setattr(main,'_collection_status',{'running':False})
+        monkeypatch.setattr(main,'_login_running',False)
+        r=auth_client.post('/apply/start',json={'mode':'easy','execution':'submit','job_url':'https://www.linkedin.com/jobs/view/123/','review_id':'unknown'})
+        assert r.status_code==409
+
+    def test_review_default_never_requires_global_submission_enable(self, auth_client,monkeypatch):
+        monkeypatch.setattr(main,'_apply_status',{'running':False})
+        monkeypatch.setattr(main,'_collection_status',{'running':False})
+        monkeypatch.setattr(main,'_login_running',False)
+        monkeypatch.setattr(main,'_run_async_in_thread',lambda factory,status:None)
+        r=auth_client.post('/apply/start',json={'mode':'easy','job_url':'https://www.linkedin.com/jobs/view/123/'})
+        assert r.status_code==200
+        assert main._apply_status['execution']=='review'
+
+    def test_easy_endpoints_still_require_auth(self, client):
+        assert client.get('/easy/answers').status_code==401
+        assert client.get('/easy/reviews').status_code==401
+
+
 # ── Fixtures ────────────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 def _isolate_state(data_dir, monkeypatch):

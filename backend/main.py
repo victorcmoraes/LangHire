@@ -228,6 +228,8 @@ def _recover_stale_jobs():
                 if attempt and attempt["state"] == "confirmed":
                     job.update(status="applied", applied_at=job.get("applied_at") or attempt["updated_at"],
                                attempt_id=attempt["id"], evidence_dir=attempt["evidence_dir"], error=None)
+                elif attempt and attempt['state'] in ('pending','reviewed') and job.get('status') in ('in_progress','awaiting_human'):
+                    job.update(status='blocked',easy_result=attempt['state'],error='Preparation interrupted before any submit; review again')
                 elif job.get("status") in ("in_progress", "awaiting_human") or (attempt and attempt["state"] == "uncertain"):
                     job.update(status="uncertain", error="Interrupted attempt requires reconciliation; no automatic resend")
             write_jobs(jobs)
@@ -255,9 +257,11 @@ def _get_jobs_file() -> Path:
 
 def _load_jobs() -> dict:
     path = _get_jobs_file()
-    if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
-    return {}
+    from filelock import FileLock
+    with FileLock(str(path)+'.lock'):
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+        return {}
 
 
 def _get_memory_store():
@@ -511,6 +515,8 @@ async def get_profile():
 
 @app.put("/profile")
 async def update_profile(profile: dict):
+    from backend.core.easy_answers import sync_profile_facts
+    sync_profile_facts(get_data_dir(),load_profile(),profile)
     save_profile(profile)
     return {"success": True}
 
@@ -783,6 +789,10 @@ async def start_collection(body: CollectRequest):
 
     async def _do_collect():
         """Run collection logic directly, bypassing argparse."""
+        if body.source == 'linkedin':
+            from backend.core.easy_service import collect
+            await collect(get_data_dir(), load_profile(), title, min(max_jobs or 10,10), filters, _collection_status)
+            return
         from core.shared_config import LOGS_DIR, read_jobs, refresh_credentials, credential_refresh_loop
         from cli import collect_jobs
         import core.shared_config as _config
@@ -899,123 +909,25 @@ async def start_applying(body: ApplyRequest):
     if _apply_status["running"]:
         return {"success": False, "message": "Application already running"}
 
-    if load_settings().get("submission_enabled") is False:
-        return _api_error("pilot_not_ready", "Real submissions await model and pilot validation in this fork", 409)
+    if body.mode == 'easy':
+        if body.workers != 1 or _collection_status.get('running') or _login_running:
+            return _api_error('profile_busy', 'Use one worker; close login/collection first', 409)
+        if body.execution == 'submit':
+            from backend.core.easy_apply import EasyStore
+            reviews = EasyStore(get_data_dir()).reviews()
+            matching = [r for r in reviews if r['id'] == body.review_id and r['job_url'] == body.job_url]
+            with EasyStore(get_data_dir()).attempts.db() as db:
+                reviewed_count = db.execute('SELECT COUNT(DISTINCT job_url) FROM easy_reviews').fetchone()[0]
+            if not matching or reviewed_count < 3:
+                return _api_error('review_required', 'Prepare three distinct reviews, then release one matching review at a time',409)
+        _apply_status = {'running':True,'mode':'easy','workers':1,'execution':body.execution,'log':[]}
+        async def easy_run():
+            from backend.core.easy_service import run_jobs
+            await run_jobs(get_data_dir(), body, _apply_status)
+        _apply_thread = _run_async_in_thread(easy_run, _apply_status)
+        return {'success':True,'message':'Easy Apply review started' if body.execution=='review' else 'Individual reviewed submission started'}
 
-    if body.workers != 1:
-        return _api_error("profile_exclusive", "Use one worker per browser profile", 400)
-    if _collection_status.get("running"):
-        return _api_error("profile_busy", "Collection is using the browser profile", 409)
-
-    workers = body.workers
-    mode = body.mode
-    limit = body.limit
-    target_job_url = body.job_url
-    target_job_urls = body.job_urls
-
-    if target_job_url:
-        _apply_status = {"running": True, "mode": mode, "workers": 1, "log": [f"Applying to single job..."]}
-    elif target_job_urls:
-        _apply_status = {"running": True, "mode": mode, "workers": workers, "log": [f"Applying to {len(target_job_urls)} selected jobs..."]}
-    else:
-        _apply_status = {"running": True, "mode": mode, "workers": workers, "log": [f"Starting {mode} apply with {workers} worker(s)..."]}
-
-    # mode="all" applies to all pending jobs regardless of easy_apply status
-    easy_apply_filter = None if mode == "all" else (mode != "external")
-
-    async def _do_apply():
-        """Run apply logic directly, bypassing argparse."""
-        from core.shared_config import JOBS_FILE, CANDIDATE_PROFILE, QA_FILE, LOGS_DIR, load_json, credential_refresh_loop, get_memory_store
-        from cli import apply_jobs
-        import core.shared_config as _config
-
-        # Override config.get_llm with the user's UI-configured LLM
-        llm_settings = load_llm_settings()
-        if llm_settings.get("provider"):
-            from core.llm_factory import create_llm
-            _config.get_llm = lambda: create_llm(llm_settings)
-            print(f"🤖 Using {llm_settings['provider']} LLM from settings")
-
-        jobs = load_json(JOBS_FILE, {})
-        profile = load_json(CANDIDATE_PROFILE, {})
-        qa = load_json(QA_FILE, {})
-        LOGS_DIR.mkdir(exist_ok=True)
-
-        if target_job_url:
-            target = jobs.get(target_job_url)
-            if not target:
-                print("Job not found.")
-                return
-            if target.get("status") not in ("pending", "failed"):
-                print(f"Job is already {target.get('status')}.")
-                return
-            # Reset to pending so the worker can claim it
-            from core.shared_config import update_job as _update_job
-            _update_job(target_job_url, status="pending", error=None)
-            target["status"] = "pending"
-            pending = [target]
-        elif target_job_urls:
-            # Batch apply: only apply to the specific selected jobs
-            from core.shared_config import update_job as _update_job
-            pending = []
-            for url in target_job_urls:
-                j = jobs.get(url)
-                if j and j.get("status") in ("pending", "failed"):
-                    _update_job(url, status="pending", error=None)
-                    j["status"] = "pending"
-                    pending.append(j)
-        elif easy_apply_filter is None:
-            pending = [j for j in jobs.values() if j.get("status") == "pending"]
-        else:
-            pending = [
-                j for j in jobs.values()
-                if j.get("status") == "pending"
-                and (j.get("easy_apply") is True) == easy_apply_filter
-            ]
-        if limit and not target_job_url and not target_job_urls:
-            pending = pending[:limit]
-
-        if not pending:
-            print("No pending jobs to apply to.")
-            return
-
-        applied_labels = [
-            f"{j.get('title','')} at {j.get('company','')}"
-            for j in jobs.values() if j.get("status") == "applied"
-        ]
-
-        label = "All" if easy_apply_filter is None else ("Easy Apply" if easy_apply_filter else "Non-Easy Apply")
-        print(f"Applying to {len(pending)} {label} jobs with {workers} worker(s)\n")
-
-        queue = asyncio.Queue()
-        for job in pending:
-            queue.put_nowait(job)
-
-        stats = {}
-        num_workers = min(workers, len(pending))
-        cred_task = asyncio.create_task(credential_refresh_loop(CREDENTIAL_REFRESH_MINUTES))
-
-        # For mode="all", pass True for easy_apply (agent handles both types via the job URL)
-        worker_easy_apply = True if easy_apply_filter is None else easy_apply_filter
-        tasks = []
-        for i in range(num_workers):
-            if i > 0:
-                await asyncio.sleep(5)
-            tasks.append(asyncio.create_task(
-                apply_jobs.worker(f"W{i+1}", i+1, queue, profile, qa, applied_labels, worker_easy_apply, stats, cancel_flag=_apply_status)
-            ))
-        await asyncio.gather(*tasks)
-        cred_task.cancel()
-
-        print(f"\nResults: {stats}")
-        total_applied = sum(1 for j in load_json(JOBS_FILE, {}).values() if j.get("status") == "applied")
-        print(f"Total applied: {total_applied}")
-
-    def make_coro():
-        return _do_apply()
-
-    _apply_thread = _run_async_in_thread(make_coro, _apply_status)
-    return {"success": True, "message": f"Started {mode} apply with {workers} worker(s)"}
+    return _api_error('unsupported_mode', 'This fork currently runs LinkedIn Easy Apply only', 409)
 
 
 @app.post("/apply/stop")
@@ -1035,6 +947,9 @@ async def apply_status():
             "error": _apply_status.get("error"),
             "finished_at": _apply_status.get("finished_at"),
             "run_id": _apply_status.get("run_id"),
+            "stage": _apply_status.get("stage"),
+            "result": _apply_status.get("result"),
+            "job_url": _apply_status.get("job_url"),
         }
 
 
@@ -1234,7 +1149,9 @@ async def auth_status():
     """Check if LinkedIn and Gmail sessions are valid by inspecting cookies."""
     import sqlite3
     profile_dir = _get_browser_profile_dir()
-    cookies_db = Path(profile_dir) / "Default" / "Cookies"
+    cookies_db = Path(profile_dir) / "Default" / "Network" / "Cookies"
+    if not cookies_db.exists():
+        cookies_db = Path(profile_dir) / "Default" / "Cookies"
 
     result = {"linkedin": {"logged_in": False}, "gmail": {"logged_in": False}}
 
@@ -1308,7 +1225,6 @@ async def auth_login(service: str):
             with sync_playwright() as p:
                 _log.info("Playwright started, launching persistent context...")
                 # Find actual Chromium binary (critical for frozen/PyInstaller builds)
-                chromium_path = _find_playwright_chromium()
                 launch_args = ["--no-first-run", "--no-default-browser-check"]
                 if sys.platform == "linux":
                     launch_args.append("--no-sandbox")
@@ -1317,11 +1233,8 @@ async def auth_login(service: str):
                     "user_data_dir": profile_dir,
                     "headless": False,
                     "args": launch_args,
-                    "ignore_default_args": ["--enable-automation"],
+                    "channel": "chrome",
                 }
-                if chromium_path:
-                    launch_kwargs["executable_path"] = chromium_path
-                    _log.info(f"Using Chromium at: {chromium_path}")
                 context = p.chromium.launch_persistent_context(**launch_kwargs)
                 _log.info(f"Browser launched with {len(context.pages)} pages")
                 # Navigate existing page or create new one
@@ -1334,7 +1247,7 @@ async def auth_login(service: str):
                 # Keep browser open until user closes all pages
                 try:
                     while len(context.pages) > 0:
-                        context.pages[0].wait_for_event("close", timeout=300000)
+                        context.pages[0].wait_for_event("close", timeout=0)
                 except Exception:
                     pass
                 finally:
@@ -2081,6 +1994,95 @@ async def reload_plugins():
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
+@app.get('/easy/reviews')
+async def easy_reviews():
+    from backend.core.easy_apply import EasyStore
+    return EasyStore(get_data_dir()).reviews()
+
+
+@app.get('/easy/answers')
+async def easy_answers():
+    from backend.core.easy_answers import AnswerBook
+    return AnswerBook(get_data_dir()).list()
+
+
+@app.get('/easy/facts')
+async def easy_facts():
+    from backend.core.easy_answers import AnswerBook
+    return AnswerBook(get_data_dir()).facts
+
+
+@app.post('/easy/answers/{answer_id}/approve')
+async def approve_easy_answer(answer_id: int, body: dict):
+    from backend.core.easy_answers import AnswerBook
+    from backend.core.application_safety import SafetyError
+    try:
+        result = AnswerBook(get_data_dir()).approve(answer_id, body.get('value'))
+        from backend.core.easy_service import qualification_current
+        from core.shared_config import read_jobs, update_job
+        from backend.core.easy_apply import EasyStore
+        jobs = read_jobs()
+        attempts = EasyStore(get_data_dir()).attempts.list()
+        for url in result['jobs']:
+            job = jobs.get(url)
+            if (job and job.get('easy_result') == 'pending' and job.get('status') == 'blocked'
+                    and qualification_current(get_data_dir(),job.get('qualification') or {})
+                    and not any(a['job_url']==url and a['state'] in ('confirmed','uncertain','running','submitted','awaiting_human') for a in attempts)):
+                update_job(url,status='pending',error=None)
+        return {'success':True,'answer':result}
+    except SafetyError as error:
+        return _api_error('invalid_answer',str(error),400)
+
+
+@app.post('/easy/answers/{answer_id}/propose')
+async def propose_easy_answer(answer_id: int):
+    from backend.core.easy_answers import AnswerBook
+    try:
+        return await AnswerBook(get_data_dir()).propose(answer_id,load_llm_settings())
+    except Exception as error:
+        return _api_error('proposal_unavailable',str(error),409)
+
+
+@app.post('/easy/qualify')
+async def qualify_easy_job(body: dict):
+    from backend.core.easy_service import approve_qualification
+    from core.shared_config import read_jobs
+    try:
+        job = read_jobs().get(body.get('job_url'))
+        if not job or job.get('easy_apply') is not True:
+            return _api_error('unknown_job','Select an Easy Apply job',400)
+        approve_qualification(get_data_dir(),job,body.get('country'),body.get('evidence',''),body.get('fact_refs',[]),body.get('language','unknown'),body.get('currency',''),body.get('period',''))
+        return {'success':True}
+    except Exception as error:
+        return _api_error('qualification_failed',str(error),400)
+
+
+@app.get('/easy/channel')
+async def easy_channel():
+    from backend.core.easy_apply import EasyStore
+    return EasyStore(get_data_dir()).channel()
+
+
+@app.post('/easy/channel/resume')
+async def resume_easy_channel():
+    from backend.core.easy_apply import EasyStore, check_session
+    from backend.core.browser_runtime import persistent_browser
+    from filelock import FileLock
+    try:
+        with FileLock(str(get_data_dir()/'application-worker.lock'),timeout=0):
+            async with persistent_browser(get_data_dir()) as session:
+                from playwright.async_api import async_playwright
+                await session.start()
+                async with async_playwright() as p:
+                    browser = await p.chromium.connect_over_cdp(session.cdp_url)
+                    await check_session(browser.contexts[0].pages[0])
+            with EasyStore(get_data_dir()).attempts.db() as db:
+                db.execute('DELETE FROM easy_channel')
+        return {'success':True}
+    except Exception:
+        return _api_error('login_required','Open LinkedIn login, authenticate, close its window, then verify again',409)
+
+
 if __name__ == "__main__":
     def _handle_sigterm(signum, frame):
         _log.info(f"Received signal {signum} — cleaning up and exiting")

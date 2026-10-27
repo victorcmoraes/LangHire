@@ -101,7 +101,14 @@ def save_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    import time
+    for retry in range(6):
+        try:
+            tmp.replace(path)
+            break
+        except PermissionError:
+            if retry==5:raise
+            time.sleep(0.05 * 2**retry)
 
 
 def read_jobs() -> dict:
@@ -114,6 +121,18 @@ def write_jobs(jobs: dict):
     """Write jobs.json with cross-process lock."""
     with FileLock(JOBS_LOCK):
         save_json(JOBS_FILE, jobs)
+
+
+def add_collected_job(job: dict) -> bool:
+    """Merge discovery without overwriting concurrent approvals or protected records."""
+    with FileLock(JOBS_LOCK):
+        jobs=load_json(JOBS_FILE,{})
+        match=re.search(r'/jobs/view/(\d+)',job['url'])
+        if job['url'] in jobs or (match and any(re.search(r'/jobs/view/'+match[1]+r'(?:/|\?|$)',url) for url in jobs)):
+            return False
+        jobs[job['url']]=job
+        save_json(JOBS_FILE,jobs)
+        return True
 
 
 def update_job(url: str, **fields):

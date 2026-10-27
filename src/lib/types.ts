@@ -268,6 +268,9 @@ export interface CollectionStatus {
 }
 
 export interface ApplyStatus {
+  stage?: string;
+  result?: string;
+  job_url?: string;
   running: boolean;
   mode: string | null;
   workers: number;

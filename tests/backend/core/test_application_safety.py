@@ -37,9 +37,16 @@ def test_recovery_preserves_confirmed_receipt_and_invalidates_live_challenge(tmp
     store.transition(held, "awaiting_human", "captcha")
     assert AttemptStore(tmp_path).recover() == ["https://jobs.lever.co/acme/held"]
     assert store.get(confirmed)["state"] == "confirmed"
-    assert store.get(held)["state"] == "uncertain"
+    assert store.get(held)["state"] == "pending"
     with pytest.raises(SafetyError):
         store.acknowledge(held)
+
+
+def test_linkedin_identity_blocks_tracking_urls_and_trailing_slash_duplicates(tmp_path):
+    store=AttemptStore(tmp_path)
+    aid=store.begin('https://linkedin.com/jobs/view/123?trackingId=old')
+    store.transition(aid,'uncertain','Unknown result')
+    with pytest.raises(SafetyError):store.begin('https://www.linkedin.com/jobs/view/123/')
 
 
 def test_limit_shared_between_restarts_and_fortaleza_midnight(tmp_path):

@@ -1,0 +1,37 @@
+# Easy Apply pelo desktop
+
+## Executar
+
+`desktop.cmd` configura a pasta privada `.local/`, gera o sidecar e abre o Tauri em desenvolvimento. `desktop.cmd build` gera o instalador Windows. O aplicativo instalado usa a pasta padrão do sistema quando `LANGHIRE_DATA_DIR` não estiver definido. Rust/MSVC e WebView2 foram instalados/verificados nesta máquina.
+
+O token do Rust e os dados do backend respeitam o mesmo override. Não é necessária a ponte privada usada na inspeção anterior pelo Chrome. Login, coleta e candidatura compartilham o Chrome persistente e o bloqueio de perfil.
+
+## Fluxo atual
+
+1. Em Jobs, abrir o login do LinkedIn. Depois de autenticar, fechar somente a janela de login e verificar a sessão.
+2. Coletar até dez vagas por execução. A busca restringe Easy Apply; o coletor confere o botão real e deduplica o ID. Vagas novas aguardam conferência de requisitos e localização; o catálogo antigo não é liberado em lote.
+3. Selecionar a vaga, registrar trechos de elegibilidade e fatos usados. Moeda e período salarial só são preenchidos quando confirmados; a ausência de salário publicado não descarta a vaga.
+4. Usar “Preencher e revisar sem enviar”. Perguntas desconhecidas ficam no Q&A. Propostas do 8b dependem de confirmação humana.
+5. Quando o LinkedIn acrescentar histórico profissional ou acadêmico do próprio perfil, confirmar o conteúdo mostrado no Q&A. Essa confirmação considera o conteúdo: alterações no histórico exigem outra confirmação. Não aceitar dados incorretos; corrigir o perfil antes de preparar novamente.
+6. Após resolver pendências, preparar novamente. A aprovação reabre somente preparações compatíveis, sem tocar em envios confirmados ou incertos.
+7. Preparar três vagas distintas antes do primeiro envio. Cada liberação individual exige a mesma revisão, respostas, fatos e PDF; mudanças impedem o clique.
+
+A fila geral externa continua desabilitada. O fluxo Easy Apply não chama o agente genérico nem segue redirecionamentos externos. O modelo não navega nem clica.
+
+## Implementação e evidências
+
+- Estados do executor: abrir vaga/modal, identificar etapa, resolver/preencher, conferir, avançar, revisar e enviar uma vez.
+- Formatos de contato, currículo, componentes RSC e operações auxiliares foram inspecionados na interface autenticada atual. A permissão distingue leitura, telemetria nativa, upload/vinculação de currículo e envio final. Operações desconhecidas continuam bloqueadas; identificadores observados possuem testes locais.
+- O upload pelo seletor nativo exige resposta aceita do armazenamento e da vinculação do currículo. O hash do PDF é registrado; o nome de um documento antigo não comprova seu conteúdo.
+- Alertas de sucesso e carregamento não são erros de formulário. Campos obrigatórios sem resposta, validações, controles não suportados e alterações de etapa inválidas viram pendências.
+- Respostas aprovadas consideram pergunta, opções, país, idioma, empresa quando pertinente, moeda/período e fatos utilizados. Alterações explícitas no cadastro atualizam fatos sem promover valores padrão não alterados.
+- Evidências ficam em `.local/evidence/ID/`. Relatórios JSON por execução ficam em `.local/reports/`, com duração, resultados, intenções de envio e contadores de regras/cache/modelo.
+- A intenção é persistida antes do clique; somente resposta aceita do envio e confirmação do portal permitem “confirmada”. Após intenção sem confirmação, a vaga fica incerta e não pode ser repetida. O limite permanece dez intenções por dia no fuso America/Fortaleza.
+
+## Validação e limite desta entrega
+
+A interface desktop e o sidecar empacotado foram abertos e autenticados usando os dados reais. Os testes locais demonstram três revisões com o mesmo executor, envio único, respostas contextualizadas, retomada, deduplicação, bloqueio de concorrência e limite diário. Há casos de português/inglês, layout sem h1, nomes acessíveis extensos, carregamento, alertas, documentos e confirmação de histórico.
+
+No portal real, o login e a coleta funcionaram. A preparação avançou pelo contato, currículo e carta opcional e ficou pendente de confirmação do histórico do perfil. **Ainda não há três revisões reais prontas nem novos envios confirmados. O piloto permanece aberto.** O reconhecimento de operações auxiliares não constitui aprovação de formatos novos de envio final.
+
+A suíte completa da interface mantém as oito falhas de traduções já existentes no upstream (jobs.json de italiano e chinês ausentes). Elas não foram ocultadas ou substituídas por traduções fictícias.

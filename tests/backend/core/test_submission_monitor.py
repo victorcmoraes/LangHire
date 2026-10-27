@@ -121,7 +121,7 @@ async def test_unrecognized_mutation_cannot_bypass_send_tracking(fixture_portal)
     result = await page.evaluate("fetch('/new-unrecognized-endpoint', {method:'POST'}).catch(()=>'blocked')")
     assert result == "blocked"
     assert data["received"] == 0
-    assert (await monitor.finalize())["state"] == "uncertain"
+    assert (await monitor.finalize())["state"] == "pending"
 
 
 async def test_second_submit_is_blocked_before_network(fixture_portal):
@@ -184,7 +184,7 @@ async def test_unresolved_answers_block_before_intent_and_network(fixture_portal
     await page.wait_for_timeout(100)
     assert data["received"] == 0
     assert store.submissions(attempt) == []
-    assert (await monitor.finalize())["state"] == "uncertain"
+    assert (await monitor.finalize())["state"] == "pending"
 
 
 @pytest.mark.parametrize("path", ["/parseResume", "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/session-token"])

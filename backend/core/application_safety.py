@@ -4,6 +4,8 @@ import json
 import os
 import sqlite3
 import uuid
+import re
+from urllib.parse import urlsplit
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +21,14 @@ def now():
 
 class SafetyError(RuntimeError):
     pass
+
+
+def job_key(url):
+    parsed=urlsplit(url)
+    host=(parsed.hostname or '').lower().removeprefix('www.')
+    match=re.fullmatch(r'/jobs/view/(\d+)/?',parsed.path)
+    if host=='linkedin.com' and match:return 'linkedin:'+match[1]
+    return host+parsed.path.rstrip('/').removesuffix('/apply').rstrip('/')
 
 
 class AttemptStore:
@@ -69,6 +79,9 @@ class AttemptStore:
         attempt_id = uuid.uuid4().hex
         directory = self.directory / "evidence" / attempt_id
         with self.db() as db:
+            protected=db.execute("SELECT job_url FROM attempts WHERE state IN ('running','awaiting_human','submitted','uncertain','confirmed')").fetchall()
+            if any(job_key(r['job_url'])==job_key(job_url) for r in protected):
+                raise SafetyError('Existing job identity requires reconciliation; not resubmitting')
             if db.execute("SELECT 1 FROM attempts WHERE job_url=? AND state IN "
                           "('running','awaiting_human','submitted','uncertain','confirmed')",
                           (job_url,)).fetchone():
@@ -97,11 +110,11 @@ class AttemptStore:
                        (attempt_id, now(), kind, json.dumps(payload, ensure_ascii=False)))
 
     def transition(self, attempt_id, state, message=""):
-        if state not in (*ACTIVE, "uncertain", "confirmed", "rejected", "blocked"):
+        if state not in (*ACTIVE, "uncertain", "confirmed", "rejected", "blocked", "reviewed", "pending"):
             raise SafetyError("Invalid attempt state")
         with self.db() as db:
             row = db.execute("SELECT state FROM attempts WHERE id=?", (attempt_id,)).fetchone()
-            if row is None or row["state"] in ("confirmed", "uncertain", "rejected", "blocked"):
+            if row is None or row["state"] not in ACTIVE:
                 raise SafetyError("Attempt is already final or unknown")
             db.execute("UPDATE attempts SET state=?,message=?,updated_at=?,acknowledged=0 WHERE id=?",
                        (state, message, now(), attempt_id))
@@ -158,6 +171,6 @@ class AttemptStore:
         recovered = []
         for attempt in self.list():
             if attempt["state"] in ACTIVE:
-                self.transition(attempt["id"], "uncertain", "Process stopped; browser session not assumed valid")
+                self.transition(attempt["id"], "uncertain" if self.submissions(attempt["id"]) else "pending", "Process stopped; browser session not assumed valid")
                 recovered.append(attempt["job_url"])
         return recovered

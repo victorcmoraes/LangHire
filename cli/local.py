@@ -59,7 +59,10 @@ def main():
     confirm.add_argument("attempt_id")
     apply = commands.add_parser("apply")
     apply.add_argument("--limit", type=int, default=1)
-    apply.add_argument("--mode", choices=("easy", "external"), default="external")
+    apply.add_argument("--mode", choices=("easy",), default="easy")
+    apply.add_argument("--execution", choices=("review","submit"), default="review")
+    apply.add_argument("--job-url")
+    apply.add_argument("--review-id")
     args = parser.parse_args()
     store = AttemptStore(get_data_dir())
     if args.command == "doctor":
@@ -72,16 +75,14 @@ def main():
     elif args.command == "status":
         print(json.dumps(store.list(), indent=2, ensure_ascii=False))
     else:
-        settings = load_settings()
-        if settings.get("submission_enabled") is not True:
-            parser.exit(1, "Envios reais ainda não liberados: falta validar o modelo e o piloto neste fork.\n")
-        if load_llm_settings().get("provider") != "ollama":
-            parser.exit(1, "Este comando exige Ollama local.\n")
-        from cli.apply_jobs import main as apply_main
+        from backend.models import ApplyRequest
+        from backend.core.easy_service import run_jobs
         import asyncio
-        sys.argv = ["apply_jobs", "--workers", "1", "--limit", str(args.limit),
-                    "--easy-apply" if args.mode == "easy" else "--no-easy-apply"]
-        asyncio.run(apply_main())
+        if args.execution == 'submit':
+            parser.exit(1, "Libere o envio individual pela revisão no aplicativo.\n")
+        status = {}
+        asyncio.run(run_jobs(get_data_dir(),ApplyRequest(mode='easy',execution='review',limit=args.limit,job_url=args.job_url),status))
+        print(json.dumps(status,ensure_ascii=False,indent=2))
 
 
 if __name__ == "__main__":

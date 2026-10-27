@@ -241,7 +241,8 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
       const res = await startApplying({
         job_url: pendingApplyUrl,
         workers: 1,
-        mode: "all",
+        mode: "easy",
+        execution: "review",
       });
       if (!res.success) {
         alert(res.message);
@@ -346,7 +347,8 @@ export default function PendingTab({ onJobsChanged, stats }: PendingTabProps) {
       const res = await startApplying({
         job_urls: [...selectedJobs],
         workers: 1,
-        mode: "all",
+        mode: "easy",
+        execution: "review",
       });
       if (!res.success) {
         alert(res.message);

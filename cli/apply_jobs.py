@@ -112,6 +112,17 @@ async def save_new_qa(new_questions: dict, source_domain: str = ""):
 
 async def apply_to_job(job: dict, profile: dict, qa: dict, applied_labels: list[str], easy_apply: bool, worker_id: int, resume_path_override: str | None = None, cancel_flag: dict | None = None) -> str:
     """Apply to a single job. Returns final status."""
+    if easy_apply:
+        from backend.core.easy_service import qualification_current
+        from backend.core.easy_apply import execute_easy
+        qualification = job.get('qualification') or {}
+        if qualification.get('state') != 'eligible' or not qualification_current(config.DATA_DIR,qualification):
+            await save_job_status(job['url'],'blocked','Qualification review required')
+            return 'blocked'
+        result = await execute_easy(job,config.DATA_DIR,resume_path_override or RESUME_PATH,status=cancel_flag)
+        status = 'applied' if result['state']=='confirmed' else 'uncertain' if result['state']=='uncertain' else 'blocked'
+        update_job(job['url'],status=status,easy_result=result['state'],attempt_id=result['id'],evidence_dir=result['evidence_dir'],error=result['message'])
+        return status
     url = job["url"]
     title = job.get("title", "Unknown")
     company = job.get("company", "Unknown")

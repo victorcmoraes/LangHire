@@ -8,7 +8,8 @@ import asyncio
 import json
 import re
 import uuid
-from urllib.parse import urlsplit, urlunsplit
+import zlib
+from urllib.parse import urlsplit, urlunsplit, parse_qs
 
 from .application_safety import ACTIVE, AttemptStore, SafetyError
 
@@ -39,9 +40,96 @@ def is_submission(url, method):
     if method.upper() != "POST" or not is_portal(url):
         return False
     path = urlsplit(url).path.lower()
+    if (urlsplit(url).hostname or '').endswith('linkedin.com'):
+        return linkedin_request_kind(url, method) == 'submit'
     return bool(re.search(r"/(?:apply|applications?|jobapplications|easyapply)$|"
                           r"/boards/[^/]+/jobs/[^/]+$|/jobs/[^/]+/apply$|"
                           r"voyagerjobs.*(?:onsiteapply|jobapplications)|jobs(?:onsiteapply|apply)", path))
+
+
+def request_json(body):
+    try:
+        raw=body.encode() if isinstance(body,str) else body
+        if not raw:return None
+        if raw.startswith(b'\x1f\x8b'):
+            raw=zlib.decompressobj(16+zlib.MAX_WBITS).decompress(raw,1_000_000)
+        return json.loads(raw) if len(raw)<=1_000_000 else None
+    except (ValueError,TypeError,zlib.error):return None
+
+
+def request_metadata(body):
+    payload=request_json(body)
+    result={'shape':list(payload)[:12] if isinstance(payload,dict) else type(payload).__name__}
+    if isinstance(payload,dict):
+        for key in ('componentId','requestId'):
+            name=payload.get(key)
+            if isinstance(name,str) and name.startswith('com.linkedin.') and len(name)<250:result[key]=name
+        entries=payload.get('list')
+        if isinstance(entries,list) and entries and isinstance(entries[0],dict):result['entry_keys']=list(entries[0])[:12]
+        requests=payload.get('requests')
+        if isinstance(requests,list) and requests and isinstance(requests[0],dict):
+            result['request_keys']=list(requests[0])[:12]
+            result['request_shapes']={k:list(v)[:12] for k,v in requests[0].items() if isinstance(v,dict)}
+            name=requests[0].get('payload',{}).get('name')
+            if isinstance(name,str) and re.fullmatch(r'[A-Za-z][A-Za-z0-9_.]{0,200}',name):result['event_name']=name
+    return result
+
+
+def linkedin_request_kind(url, method, body=None):
+    """Explicit final-submit action; draft creation is not a submission receipt."""
+    parsed = urlsplit(url)
+    if parsed.hostname not in ('linkedin.com','www.linkedin.com'): return 'unsupported'
+    if method.upper() in ('GET','HEAD','OPTIONS'): return 'read'
+    path = parsed.path.lower().rstrip('/')
+    action = parse_qs(parsed.query).get('action',[''])[0].lower()
+    payload=request_json(body)
+    entries=payload.get('list') if isinstance(payload,dict) and set(payload)=={'list'} else payload
+    if isinstance(entries,list) and entries and all(isinstance(e,dict) and isinstance(e.get('eventInfo'),dict) and isinstance(e.get('eventBody'),dict) for e in entries):
+        return 'telemetry'
+    if isinstance(payload,dict) and set(payload)=={'clientContext','requests'} and isinstance(payload['requests'],list) and payload['requests']:
+        if all(isinstance(r,dict) and isinstance(r.get('payload'),dict)
+               and isinstance(r['payload'].get('name'),str) and r['payload']['name'].endswith('Event')
+               and isinstance(r['payload'].get('isPegasusEncoded'),bool) for r in payload['requests']):return 'telemetry'
+    if path=='/ambry':return 'upload'
+    if path in ('/sensorcollect','/realtime/realtimefrontendclientconnectivitytracking','/voyager/api/messaging/dash/presencestatuses') or path.startswith('/litms/api/events/'):
+        return 'telemetry'
+    if path=='/flagship-web/rsc-action/actions/app-config' and payload=={}:return 'read'
+    if path=='/flagship-web/rsc-action/actions/component' and isinstance(payload,dict):
+        allowed={f'com.linkedin.sdui.generated.jobseeker.dsl.impl.{name}' for name in (
+            'aboutTheJob','peopleWhoCanHelp','howYouFitGuide','premiumCompanyInsightsForJobDetails',
+            'aboutTheCompanyForJobDetails','jobAlertToggle','jobDetailsCourseRecommendations',
+            'manageJobBanner','premiumApplicantInsightsForJobDetails','resumeReview','similarJobs','uploadedDocument')}
+        if payload.get('componentId') in allowed:return 'read'
+    if path=='/flagship-web/rsc-action/actions/server-request' and isinstance(payload,dict):
+        if payload.get('requestId') in ('com.linkedin.sdui.requests.jobseeker.easyapply.handlePickedFile',
+                                        'com.linkedin.sdui.requests.jobseeker.easyapply.getAmbryUploadUrl'):return 'upload'
+        if payload.get('requestId')=='com.linkedin.sdui.requests.jobseeker.easyapply.setResumeFormBinding':return 'draft'
+        if payload.get('requestId') in ('com.linkedin.sdui.impl.homenav.requests.getThirdPartyTrackingPixels',
+                                        'com.linkedin.sdui.infra.register.cooloff.activity'):
+            return 'telemetry'
+        if (payload.get('requestId')=='com.linkedin.sdui.requests.jobSeeker.jobPostingActivityLog'
+                and payload.get('requestedArguments',{}).get('payload',{}).get('activityType')=='JobActivityType_VIEW'):
+            return 'telemetry'
+    if path=='/flagship-web/rsc-action/actions/navigation' and isinstance(payload,dict):
+        args=payload.get('clientArguments',{})
+        if (isinstance(args,dict) and args.get('screenId')=='com.linkedin.sdui.flagshipnav.jobs.easyapply.EasyApply'
+                and payload.get('isModal') is True
+                and isinstance(args.get('payload'),dict)
+                and set(args['payload'])<= {'applicantTrackingSystemName','companyName','jobId','trackingId'}):
+            return 'read'
+    if re.fullmatch(r'/flagship-web/(?:feed|in/[^/]+)',path) and isinstance(payload,dict) and set(payload)<= {'requestedArguments','isPrefetch'}:
+        return 'read'
+    if path in ('/voyager/api/voyagerjobsdashonsiteapplyapplications',
+                '/voyager/api/jobs/onsiteapply', '/voyager/api/jobs/onsiteapplyapplications'):
+        return 'submit' if action == 'submit' else 'unsupported'
+    if path == '/voyager/api/graphql':
+        query = parse_qs(parsed.query).get('queryId',[''])[0]
+        return 'read' if method.upper() == 'POST' and query.startswith('voyagerJobsDash') and not re.search('submit|create|update|delete|applyapplication',query,re.I) else 'unsupported'
+    if path in ('/voyager/api/mediauploadmetadata','/voyager/api/voyagermediadashuploadmetadata'):
+        return 'upload'
+    if path in ('/voyager/api/jobs/onsiteapplydrafts','/voyager/api/voyagerjobsdashonsiteapplydrafts'):
+        return 'draft'
+    return 'unsupported'
 
 
 class SubmissionMonitor:
@@ -62,6 +150,7 @@ class SubmissionMonitor:
         self.blocked_request = None
         self.rejected_responses = set()
         self.armed_request_key = None
+        self.upload_receipts = []
 
     def arm_submission(self, url):
         """Count and persist the operator's final submit intent BEFORE the click."""
@@ -121,6 +210,10 @@ class SubmissionMonitor:
             auxiliary = is_portal(request.url) and re.search(
                 r"/(?:upload|attachments?|analytics|tracking|telemetry|events?|metrics|"
                 r"autocomplete|locations?|countries|validate|parseresume)(?:/|$)", path)
+            if linkedin_request_kind(request.url,request.method,request.post_data_buffer) in ('read','upload','draft','telemetry'):
+                auxiliary = True
+            if host=='collector-pxdojv695v.protechts.net' and path=='/api/v2/msft':
+                auxiliary = True  # Native site verification; no token is generated or altered here.
             # Permit the portal's own browser/session verification. No challenge
             # is solved or token fabricated by this code; native site scripts run.
             if is_portal(request.url) and path.startswith("/cdn-cgi/challenge-platform/"):
@@ -135,11 +228,22 @@ class SubmissionMonitor:
             if not auxiliary:
                 self.blocked_request = clean_url(request.url)
                 self.store.event(self.attempt_id, "unsupported_post_blocked", {"url": self.blocked_request})
+                if host in ('www.linkedin.com','linkedin.com'):
+                    self.store.event(self.attempt_id,'unsupported_operation_metadata',request_metadata(request.post_data_buffer))
                 await route.abort("blockedbyclient")
                 return
         await route.fallback()
 
     def on_response(self, response):
+        path=urlsplit(response.url).path.rstrip('/').lower()
+        host=urlsplit(response.url).hostname
+        if host in ('linkedin.com','www.linkedin.com') and response.request.method=='POST':
+            payload=request_json(response.request.post_data_buffer) if path.endswith('/server-request') else None
+            kind='binding' if isinstance(payload,dict) and payload.get('requestId')=='com.linkedin.sdui.requests.jobseeker.easyapply.setResumeFormBinding' else 'binary' if path=='/ambry' else None
+            if kind:
+                receipt={'kind':kind,'status':response.status,'url':clean_url(response.url)}
+                self.upload_receipts.append(receipt)
+                self.store.event(self.attempt_id,'resume_upload_response',receipt)
         if response.request in self.requests:
             task = asyncio.create_task(self.record_response(response))
             self.response_tasks.add(task)
@@ -220,7 +324,7 @@ class SubmissionMonitor:
                 agent.stop()
             return
         if self.blocked_request:
-            await self.finish("uncertain", "Unrecognized portal POST blocked before network; endpoint requires review")
+            await self.finish("uncertain" if self.store.submissions(self.attempt_id) else "pending", "Unrecognized portal POST blocked before network; endpoint requires review")
             if agent:
                 agent.stop()
             return
@@ -249,6 +353,9 @@ class SubmissionMonitor:
                     await self.finish("uncertain", "Portal reported a submission/verification error; do not resend")
                     break
                 sends = self.store.submissions(self.attempt_id)
+                if any(row['http_status']==422 and row['request_key'] in self.rejected_responses for row in sends):
+                    await self.finish('rejected','Portal explicitly rejected the payload with HTTP 422 and validation errors; evidence retained')
+                    break
                 accepted = any(row["http_status"] and 200 <= row["http_status"] < 300 and
                                row["request_key"] not in self.rejected_responses for row in sends)
                 if accepted and any(SUCCESS.search(view["text"]) for view in views):

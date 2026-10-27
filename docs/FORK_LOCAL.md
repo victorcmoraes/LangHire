@@ -1,5 +1,7 @@
 # Operação do fork local
 
+O fluxo atual de Easy Apply e desktop está descrito em [EASY_APPLY_DESKTOP.md](EASY_APPLY_DESKTOP.md). As seções abaixo também preservam o histórico das entregas anteriores; o piloto real ainda não foi concluído.
+
 Este fork mantém o LangHire como base. A primeira alteração trata de tentativas duráveis, confirmação independente e intervenção humana. Ela não declara o piloto real concluído.
 
 ## Estado desta entrega

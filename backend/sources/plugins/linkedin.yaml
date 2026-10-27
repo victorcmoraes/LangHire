@@ -15,6 +15,14 @@ auth_cookies:
 search_url: "https://www.linkedin.com/jobs/search/?keywords={title}&location={location}"
 
 filters:
+  - key: easy_apply
+    label: "Easy Apply"
+    type: select
+    options:
+      - { value: "true", label: "Easy Apply only" }
+    url_param: "f_AL"
+    default: "true"
+
   - key: date_posted
     label: "Posted within"
     type: select
@@ -62,11 +70,6 @@ collection_prompt: |
   1. Go to https://www.linkedin.com/feed/ to check if you're logged into LinkedIn.
      - If you see the feed/home page → logged in ✓
      - If you see a login page → WAIT for user to log in manually. Check every 15 seconds (refresh). Wait up to 5 minutes.
-  2. Open a new tab and go to https://mail.google.com/mail/u/0/#inbox to check Gmail.
-     - If you see the Gmail inbox → logged in ✓
-     - If you see a Google sign-in page → WAIT for user to log in manually. Check every 15 seconds. Wait up to 5 minutes.
-  3. Close the Gmail tab and switch back to LinkedIn.
-
   THEN: Navigate directly to this pre-filtered search URL:
   {search_url}
   Do NOT re-search or modify the filters. Results are ready.
@@ -86,7 +89,7 @@ collection_prompt: |
   - Output ONE @@JOB_FOUND marker per step in your MEMORY field. Do NOT batch them.
   - Do NOT use extract, find_elements, or evaluate to get URLs. Just click and read the URL bar.
   - Do NOT apply to any jobs — only collect listings.
-  - Include BOTH Easy Apply and non-Easy Apply jobs.
+  - Include only jobs whose Easy Apply button was verified. Do not follow external application links.
   - Stop after collecting {max_jobs} NEW jobs and call done.
   - After scrolling through all results, call done.
 
