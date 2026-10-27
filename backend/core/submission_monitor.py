@@ -23,7 +23,10 @@ ERROR = re.compile(
 
 def clean_url(url):
     parsed = urlsplit(url)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    path = parsed.path
+    if path.startswith("/cdn-cgi/challenge-platform/"):
+        path = "/cdn-cgi/challenge-platform/[session-path-redacted]"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def is_portal(url):
@@ -42,12 +45,13 @@ def is_submission(url, method):
 
 
 class SubmissionMonitor:
-    def __init__(self, store: AttemptStore, attempt_id, *, daily_limit=10, cancel=None):
+    def __init__(self, store: AttemptStore, attempt_id, *, daily_limit=10, cancel=None, pre_submit_review=None):
         self.store = store
         self.attempt_id = attempt_id
         self.directory = store.directory / "evidence" / attempt_id
         self.daily_limit = daily_limit
         self.cancel = cancel
+        self.pre_submit_review = pre_submit_review
         self.playwright = None
         self.browser = None
         self.contexts = []
@@ -57,6 +61,15 @@ class SubmissionMonitor:
         self.capture_number = 0
         self.blocked_request = None
         self.rejected_responses = set()
+        self.armed_request_key = None
+
+    def arm_submission(self, url):
+        """Count and persist the operator's final submit intent BEFORE the click."""
+        if self.armed_request_key is not None:
+            raise SafetyError("Submit click already armed")
+        key = uuid.uuid4().hex
+        self.store.intent(self.attempt_id, key, clean_url(url), self.daily_limit)
+        self.armed_request_key = key
 
     async def attach(self, session):
         from playwright.async_api import async_playwright
@@ -76,8 +89,14 @@ class SubmissionMonitor:
     async def route(self, route):
         request = route.request
         if is_submission(request.url, request.method):
-            key = uuid.uuid4().hex
+            key = self.armed_request_key if self.armed_request_key and not self.requests else uuid.uuid4().hex
             try:
+                if self.pre_submit_review:
+                    review = await self.pre_submit_review()
+                    self.store.event(self.attempt_id, "pre_submit_review", review)
+                    if not review.get("ready"):
+                        self.blocked_request = clean_url(request.url)
+                        raise SafetyError("Pre-submit review blocked the request: " + review.get("reason", "unresolved fields"))
                 self.store.intent(self.attempt_id, key, clean_url(request.url), self.daily_limit)
                 self.requests[request] = key
                 await self.capture("before-submit")
@@ -90,7 +109,7 @@ class SubmissionMonitor:
             # Expand this list only with endpoint-specific fixtures/evidence.
             path = urlsplit(request.url).path.lower()
             host = (urlsplit(request.url).hostname or "").lower()
-            telemetry = any(host == suffix or host.endswith("." + suffix) for suffix in (
+            telemetry = (host.endswith("linkedin.com") and path.startswith("/li/track")) or any(host == suffix or host.endswith("." + suffix) for suffix in (
                 "google-analytics.com", "googletagmanager.com", "segment.io", "segment.com", "sentry.io",
                 "datadoghq.com", "browser-intake-datadoghq.com", "fullstory.com", "hotjar.com", "mixpanel.com", "amplitude.com",
             ))
@@ -101,7 +120,13 @@ class SubmissionMonitor:
                                (host in ("www.google.com", "www.recaptcha.net") and path.startswith("/recaptcha/")))
             auxiliary = is_portal(request.url) and re.search(
                 r"/(?:upload|attachments?|analytics|tracking|telemetry|events?|metrics|"
-                r"autocomplete|locations?|countries|validate)(?:/|$)", path)
+                r"autocomplete|locations?|countries|validate|parseresume)(?:/|$)", path)
+            # Permit the portal's own browser/session verification. No challenge
+            # is solved or token fabricated by this code; native site scripts run.
+            if is_portal(request.url) and path.startswith("/cdn-cgi/challenge-platform/"):
+                auxiliary = True
+            if host.endswith("linkedin.com") and path == "/talentwidgets/apply-with-linkedin":
+                auxiliary = True  # Embedded profile-widget initialization, not final application submit.
             if host.endswith(".s3.amazonaws.com") and "multipart/form-data" in request.headers.get("content-type", ""):
                 auxiliary = True  # A hosted ATS may use a signed object-storage form for its PDF upload.
             if human_challenge:
@@ -154,6 +179,11 @@ class SubmissionMonitor:
                         for element in await frame.locator(
                             'iframe[src*="hcaptcha"], iframe[src*="recaptcha"], [data-captcha-challenge]'
                         ).all():
+                            if not await element.is_visible():
+                                continue
+                            opaque = await element.evaluate("e=>{for(let n=e;n;n=n.parentElement){if(getComputedStyle(n).opacity==='0')return false;}return true;}")
+                            if not opaque:
+                                continue
                             box = await element.bounding_box()
                             if box and box["height"] > 150 and box["width"] > 150:
                                 challenge = True

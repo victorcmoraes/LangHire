@@ -85,3 +85,22 @@ npm.cmd test -- src/components/HumanInterventions.test.tsx src/pages/jobs/Pendin
 Os testes novos usam Chromium real com formulários interceptados localmente: confirmação, sucesso visual com HTTP 500, rejeição JSON com HTTP 200, erro de verificação, CAPTCHA seguido de confirmação/erro, tentativa repetida, limite entre reinícios e na virada do dia, importação e recuperação de confirmação persistida.
 
 A suíte completa da interface tem oito falhas preexistentes na checagem de traduções: os arquivos jobs.json de italiano e chinês não existem no commit de origem. A interface possui fallback para inglês. Esses arquivos não foram inventados nem os testes desativados nesta alteração.
+
+
+## Piloto supervisionado e perfil persistente
+
+O diagn?stico b?sico do Qwen3 8b passou em 119,56 segundos e tr?s passos, contra 156,67 segundos do 4b. O 8b ? a configura??o local selecionada; a avalia??o geral de respostas continua sem aprova??o. Os resultados s?o de um formul?rio fict?cio de dois campos, sem candidaturas reais.
+
+O browser-use copia perfis Chrome por padr?o. O worker agora inicia um contexto persistente Playwright pr?prio e conecta o browser-use por CDP local, preservando cookies no perfil configurado. Um teste abre duas sess?es e verifica a persist?ncia de cookie. O bloqueio exclusivo continua obrigat?rio.
+
+Para uma candidatura individual revisada, sem habilitar a fila geral:
+
+```powershell
+.venv\Scripts\python.exe cli/pilot.py URL_DO_FORMULARIO
+```
+
+O operador local prepara campos sustentados por fatos em `control.json`, confere os valores aceitos em `review-N.json` e libera o digest daquela revis?o. O comando n?o gera respostas com o modelo. A inten??o ? persistida antes de um ?nico clique; CAPTCHA mant?m a mesma sess?o aberta e usa o comando `confirm` j? descrito. N?o iniciar outro worker enquanto houver interven??o aberta.
+
+A prepara??o distingue upload e inicializa??o de widgets dos endpoints de envio. As verifica??es nativas do portal seguem normalmente; telemetria LinkedIn ? bloqueada sem transformar a candidatura em falha. CAPTCHA oculto n?o gera interven??o. O autocomplete confere cidade, estado e pa?s aceitos, tolerando o enriquecimento posterior de metadados do Lever. Nenhuma dessas mudan?as resolve CAPTCHA automaticamente.
+
+QuintoAndar permanece pendente por decis?o do usu?rio: CPF e nacionalidade ausentes. A primeira tentativa liberada no novo piloto ? CI&T 31846 e est? aguardando interven??o humana; n?o h? confirma??o de envio registrada at? esta atualiza??o. Prepara??es encerradas antes do clique foram preservadas com zero inten??es de envio. O teto de 200 permanece bloqueado at? aprova??o do piloto.

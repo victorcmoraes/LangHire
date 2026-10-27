@@ -25,6 +25,7 @@ from filelock import FileLock, Timeout as LockTimeout
 from backend.core.application_safety import AttemptStore, SafetyError, ACTIVE
 from backend.core.submission_monitor import SubmissionMonitor
 from backend.core.config import load_llm_settings
+from backend.core.browser_runtime import persistent_browser
 
 try:
     import core.shared_config as config
@@ -181,18 +182,14 @@ async def _execute_attempt(job, profile, qa, applied_labels, easy_apply, worker_
         raise SafetyError("Real submissions are disabled pending model/pilot validation")
     llm = config.get_llm()
     # Use the shared browser profile in OS data dir (same as login endpoint)
-    browser = BrowserSession(user_data_dir=str(BROWSER_PROFILE_DIR), chromium_sandbox=(sys.platform != "linux"),
-                             headless=False, keep_alive=True, captcha_solver=False, enable_default_extensions=False)
-    monitor = SubmissionMonitor(store, attempt_id, cancel=cancel_flag)
-    try:
-        await monitor.attach(browser)
-        return await _run_observed_agent(job, profile, qa, applied_labels, easy_apply, worker_id,
-                                         resume_path_override, store, attempt_id, browser, monitor, llm)
-    finally:
+    async with persistent_browser(config.DATA_DIR) as browser:
+        monitor = SubmissionMonitor(store, attempt_id, cancel=cancel_flag)
         try:
-            await monitor.close()
+            await monitor.attach(browser)
+            return await _run_observed_agent(job, profile, qa, applied_labels, easy_apply, worker_id,
+                                             resume_path_override, store, attempt_id, browser, monitor, llm)
         finally:
-            await browser.kill()  # Only the session created by this attempt.
+            await monitor.close()
 
 
 async def _run_observed_agent(job, profile, qa, applied_labels, easy_apply, worker_id,

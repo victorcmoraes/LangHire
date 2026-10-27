@@ -173,3 +173,50 @@ async def test_analytics_post_does_not_poison_the_application(fixture_portal):
     assert monitor.blocked_request is None
     await click_submit(page, monitor)
     assert (await monitor.finalize())["state"] == "confirmed"
+
+
+async def test_unresolved_answers_block_before_intent_and_network(fixture_portal):
+    page, data, store, attempt, monitor = fixture_portal
+    async def review():
+        return {"ready": False, "reason": "Required answer has no supporting fact"}
+    monitor.pre_submit_review = review
+    await page.get_by_role("button", name="Submit application").click()
+    await page.wait_for_timeout(100)
+    assert data["received"] == 0
+    assert store.submissions(attempt) == []
+    assert (await monitor.finalize())["state"] == "uncertain"
+
+
+@pytest.mark.parametrize("path", ["/parseResume", "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/session-token"])
+async def test_native_verification_and_resume_parsing_are_not_application_sends(fixture_portal, path):
+    page, data, store, attempt, monitor = fixture_portal
+    await page.evaluate("path=>fetch(path,{method:'POST'}).then(r=>r.status)", path)
+    assert monitor.blocked_request is None
+    assert store.submissions(attempt) == []
+
+
+def test_browser_verification_session_paths_are_not_written_to_logs():
+    assert "session-token" not in clean_url("https://jobs.lever.co/cdn-cgi/challenge-platform/h/b/jsd/oneshot/session-token")
+
+
+async def test_hidden_fullscreen_captcha_iframe_does_not_create_a_human_hold(fixture_portal):
+    page, data, store, attempt, monitor = fixture_portal
+    await page.set_content('<iframe src="https://newassets.hcaptcha.com/fixture" style="visibility:hidden;position:fixed;width:100%;height:100%"></iframe>')
+    assert not any(view["challenge"] for view in await monitor.observe())
+
+
+async def test_final_click_is_counted_before_transport_and_not_counted_twice(fixture_portal):
+    page, data, store, attempt, monitor = fixture_portal
+    monitor.arm_submission("https://jobs.lever.co/acme/job/apply")
+    assert len(store.submissions(attempt)) == 1
+    assert data["received"] == 0
+    await click_submit(page, monitor)
+    assert (await monitor.finalize())["state"] == "confirmed"
+    assert len(store.submissions(attempt)) == 1
+
+
+async def test_linkedin_widget_tracking_is_not_a_submission_or_fatal_error(fixture_portal):
+    page, data, store, attempt, monitor = fixture_portal
+    await page.evaluate("fetch('https://www.linkedin.com/li/track', {method:'POST'}).catch(()=>null)")
+    assert monitor.blocked_request is None
+    assert store.submissions(attempt) == []
