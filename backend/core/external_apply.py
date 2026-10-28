@@ -79,7 +79,7 @@ class LeverAdapter:
         self.page=page;self.job=job;self.data=Path(data);self.attempt=attempt;self.monitor=monitor
         self.book=AnswerBook(data);self.used=[];self.expected=[];self.resume_verified=False
         self.directory=Path(self.book.store.get(attempt)['evidence_dir'])
-        self.metrics={'rule':0,'cache':0,'pending':0,'model':0}
+        self.metrics={'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
         self.status=status if status is not None else {}
 
     def stage(self,stage):
@@ -284,7 +284,10 @@ async def execute_external(job,data,resume,execution='review',status=None,lease_
                     await adapter.run(resume,execution)
                 except BaseException as error:
                     aid=monitor.attempt_id
-                    store.event(aid,'external_error',{'type':type(error).__name__,'message':str(error)[:700]})
+                    import traceback
+                    # Code locations only; frames never include page content or answers.
+                    where=[f'{Path(f.filename).name}:{f.lineno} {f.name}' for f in traceback.extract_tb(error.__traceback__)][-6:]
+                    store.event(aid,'external_error',{'type':type(error).__name__,'message':str(error)[:700],'where':where})
                     await monitor.capture('external-failure')
                     if store.get(aid)['state'] in ACTIVE:store.transition(aid,'uncertain' if store.submissions(aid) else 'pending',str(error)[:700])
                     if isinstance(error,asyncio.CancelledError):raise

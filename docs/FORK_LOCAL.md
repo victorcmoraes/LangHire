@@ -44,6 +44,22 @@ uv run --frozen python cli/interventions.py list
 uv run --frozen python cli/interventions.py confirm ID_DA_TENTATIVA
 ```
 
+## Respostas autônomas e resultados
+
+Com `automation_answers.mode = "autonomous"` em `.local/settings.json`, o modelo local (por padrão `qwen3:8b`; outro modelo deve ser nomeado em `automation_answers.model`) responde e aprova sozinho as perguntas de preferência e de skill. Fatos verificáveis (autorização de trabalho, diploma, anos, salário atual, vínculo com a empresa) só saem do cadastro. Experiência que o cadastro não mostra fica pendente para o candidato. Respostas aprovadas por uma pessoa nunca são sobrescritas.
+
+```powershell
+# Responde as perguntas pendentes já guardadas, sem navegador e sem envio
+.venv\Scripts\python.exe -m cli.external resolve-pending
+# Lê o Gmail (somente leitura), classifica respostas das empresas e mede quem avançou
+.venv\Scripts\python.exe -m cli.mail outcomes
+.venv\Scripts\python.exe -m cli.mail outcomes --rescan   # após mudar regras de classificação
+```
+
+O relatório de resultados fica em `.local/reports/outcomes-*.json`, com o funil por plataforma e por uso de respostas autônomas. Corpos de e-mail não são gravados.
+
+As cidades aceitas para vagas presenciais vêm do fato `location.commuteCities` (ou `location.city`), e o piso salarial de `salary.minimumBrlMonthly`.
+
 ## Importação da POC
 
 Execute uma vez, para um destino sem dados operacionais existentes:

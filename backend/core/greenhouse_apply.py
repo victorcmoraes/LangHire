@@ -56,7 +56,7 @@ def schema_fields(schema):
 
 async def preflight_greenhouse(data,job):
     """Resolve mandatory facts before opening a browser or uploading a resume."""
-    schema=await fetch_schema(job);book=AnswerBook(data);pending=[];metrics={'rule':0,'cache':0,'pending':0,'model':0}
+    schema=await fetch_schema(job);book=AnswerBook(data);pending=[];metrics={'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
     job=dict(job,form_language=schema.get('language') or job.get('form_language','unknown'))
     for field in schema_fields(schema):
         if not field['required']:continue
@@ -79,7 +79,7 @@ class GreenhouseAdapter:
         self.page=page;self.job=job;self.data=Path(data);self.attempt=attempt;self.monitor=monitor
         self.book=AnswerBook(data);self.directory=Path(self.book.store.get(attempt)['evidence_dir'])
         self.status=status if status is not None else {};self.used=[];self.expected=[];self.resume_verified=False
-        self.metrics={'rule':0,'cache':0,'pending':0,'model':0}
+        self.metrics={'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
         self.monitor.email_verification_handler=self.handle_email_verification
 
     def stage(self,stage):
@@ -172,7 +172,8 @@ class GreenhouseAdapter:
                 if await clear.count()!=1:raise SafetyError('Cannot safely replace selected survey answers')
                 await clear.click()
             for choice in value:
-                label=next(o['text'] for o in field['options'] if o['value']==str(choice))
+                label=next((o['text'] for o in field['options'] if o['value']==str(choice)),None)
+                if label is None:raise SafetyError('Answer is not an option of: '+field['label'])
                 await target.click();await target.fill(label)
                 await self.page.get_by_role('option',name=label,exact=True).click(timeout=10000)
         elif field['type']=='checkbox-group':
@@ -183,12 +184,14 @@ class GreenhouseAdapter:
             for control in await controls.all():
                 await control.set_checked((await control.input_value()) in value)
         elif field.get('render')=='combobox':
-            option=next(o['text'] for o in field['options'] if o['value']==str(value))
+            option=next((o['text'] for o in field['options'] if o['value']==str(value)),None)
+            if option is None:raise SafetyError('Answer is not an option of: '+field['label'])
             await target.click();await target.fill(option)
             await self.page.get_by_role('option',name=option,exact=True).click(timeout=10000)
         elif field['type']=='select-one':await target.select_option(str(value))
         else:await target.fill(str(value))
-        current=next(f for f in await self.inspect() if f['id']==field['id'])
+        current=next((f for f in await self.inspect() if f['id']==field['id']),None)
+        if current is None:raise SafetyError('Field disappeared after answering: '+field['label'])
         if field['id']=='phone':
             digits=lambda s:re.sub(r'\D','',str(s))
             if digits(current['value'])!=digits(value):raise SafetyError('Greenhouse did not accept phone number')

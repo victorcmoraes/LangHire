@@ -100,3 +100,11 @@ def test_specialist_accounting_and_production_ml_are_not_implied_by_general_engi
     assert qualify(job('Requirements:\nPython',title='Software Engineer II with Accounting Experience'),FACTS)['state']=='pending'
     description='Requirements:\n2+ years of software engineering experience, with a strong focus on ML engineering and deploying machine learning models in production.'
     assert qualify(job(description),FACTS)['reason']=='specific_production_ml_requirement'
+
+
+def test_home_region_and_salary_floor_come_from_confirmed_facts():
+    from core.external_qualification import home_cities
+    assert home_cities({'location.city':{'value':'Olinda'}})==['Olinda']
+    assert home_cities({'location.commuteCities':{'value':['Olinda','Recife']},'location.city':{'value':'Olinda'}})==['Olinda','Recife']
+    from core.external_discovery import candidate_location
+    assert candidate_location({'location':'Recife, PE'},['Recife']) and not candidate_location({'location':'Recife, PE'},['Olinda'])

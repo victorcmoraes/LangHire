@@ -77,7 +77,7 @@ async def run_jobs(data, body, status):
         report={'execution':body.execution,'seconds':round(time.monotonic()-started,2),
                 'attempts':[{'id':a['id'],'job_url':a['job_url'],'state':a['state'],'message':a['message'],'evidence_dir':a['evidence_dir']} for a in rows],
                 'results':{s:sum(a['state']==s for a in rows) for s in ['reviewed','pending','confirmed','rejected','uncertain']},
-                'submit_intents':sum(len(store.submissions(a['id'])) for a in rows),'answers':{'rule':0,'cache':0,'pending':0,'model':0}}
+                'submit_intents':sum(len(store.submissions(a['id'])) for a in rows),'answers':{'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}}
         with store.db() as db:
             for a in rows:
                 for event in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='answer_metrics'",(a['id'],)):

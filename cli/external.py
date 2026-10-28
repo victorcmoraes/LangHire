@@ -41,6 +41,8 @@ def main():
     approve.add_argument('--currency');approve.add_argument('--period',choices=('monthly','annual','hourly'))
     diagnose=sub.add_parser('diagnose-lever');diagnose.add_argument('--job-url',required=True)
     preflight=sub.add_parser('preflight');preflight.add_argument('--limit',type=int,default=50)
+    resolve=sub.add_parser('resolve-pending',help='Answer stored pending questions with the local model; no browser, no sends')
+    resolve.add_argument('--limit',type=int)
     export=sub.add_parser('export');export.add_argument('--tracker',type=Path)
     reconcile=sub.add_parser('reconcile-receipt');reconcile.add_argument('--attempt-id',required=True)
     reconcile.add_argument('--capture',required=True);reconcile.add_argument('--screenshot',required=True)
@@ -52,6 +54,10 @@ def main():
         value=args.text if args.text is not None else json.loads(args.value_file.read_text(encoding='utf-8') if args.value_file else args.json_value)
         row=AnswerBook(data).approve(args.id,value,{'currency':args.currency,'period':args.period} if args.currency else None)
         print(json.dumps({'id':row['id'],'state':row['state'],'context':row['context'],'jobs_affected':len(row['jobs'])},ensure_ascii=False,indent=2));return
+    if args.command=='resolve-pending':
+        from backend.core.automatic_answers import resolve_pending
+        show=lambda row,state:print(json.dumps({'id':row['id'],'question':row['question'][:90],'result':state},ensure_ascii=False),flush=True)
+        print(json.dumps(asyncio.run(resolve_pending(data,args.limit,show)),ensure_ascii=False,indent=2));return
     if args.command=='diagnose-lever':
         from filelock import FileLock
         import shutil

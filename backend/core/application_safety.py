@@ -55,6 +55,8 @@ class AttemptStore:
                     id INTEGER PRIMARY KEY, attempt_id TEXT NOT NULL,
                     at TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS events_attempt_kind ON events(attempt_id, kind);
+                CREATE INDEX IF NOT EXISTS events_kind ON events(kind);
                 CREATE TABLE IF NOT EXISTS submissions (
                     id INTEGER PRIMARY KEY, attempt_id TEXT NOT NULL,
                     request_key TEXT UNIQUE NOT NULL, at TEXT NOT NULL,

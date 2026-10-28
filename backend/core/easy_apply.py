@@ -161,7 +161,7 @@ class EasyExecutor:
         self.resume = None
         self.resume_hash = ''
         self.resume_verified = False
-        self.counters = {'rule': 0, 'cache': 0, 'pending': 0, 'model': 0}
+        self.counters = {'rule': 0, 'cache': 0, 'pending': 0, 'model': 0, 'autonomous': 0}
 
     def stage(self, value):
         self.status.update(stage=value, job_url=self.job['url'], attempt_id=self.attempt)

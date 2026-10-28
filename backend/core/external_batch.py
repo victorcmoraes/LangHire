@@ -134,7 +134,7 @@ class BatchStore:
         # Imported/reconciled history is reported separately from new work.
         new_attempts=[a for a in attempts if a['created_at']>=batch['created_at'] and job_key(a['job_url']) in selected]
         current_attempts=[a for a in new_attempts if not run_started or a['created_at']>=run_started]
-        browser_metrics={'rule':0,'cache':0,'pending':0,'model':0}
+        browser_metrics={'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
         with self.attempts.db() as db:
             for a in current_attempts:
                 for row in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='answer_metrics'",(a['id'],)):
@@ -179,14 +179,16 @@ async def prepare_batch(store,bid,metrics,answer_run_id=None):
 
 async def run_batch(data,bid,*,discovery=None):
     from .config import load_settings
-    store=BatchStore(data);started=time.monotonic();run_started=now();run_id=uuid.uuid4().hex;metrics={'rule':0,'cache':0,'pending':0,'model':0}
+    store=BatchStore(data);started=time.monotonic();run_started=now();run_id=uuid.uuid4().hex;metrics={'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
     batch=store.get(bid);execution=batch['config']['execution'];status={'mode':'external_batch','batch_id':bid,'answer_run_id':run_id,'running':True}
     stop=store.data/'external/stop.json'
     async def watch():
         while True:
             if stop.exists():status['cancel_requested']=True
             path=store.data/'external/run-state.json';temporary=path.with_suffix('.tmp')
-            temporary.write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8');temporary.replace(path)
+            # Windows refuses the replace while a reader (desktop UI, monitor) has the file open; retry next tick.
+            try:temporary.write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8');temporary.replace(path)
+            except PermissionError:pass
             await asyncio.sleep(.5)
     watcher=None;preparer=None
     try:
@@ -246,6 +248,7 @@ async def run_batch(data,bid,*,discovery=None):
             try:await watcher
             except asyncio.CancelledError:pass
             status['running']=False
-            (store.data/'external/run-state.json').write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8')
+            try:(store.data/'external/run-state.json').write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8')
+            except PermissionError:pass
             report=store.report(bid,time.monotonic()-started,metrics,discovery,run_started,run_id)
     return report

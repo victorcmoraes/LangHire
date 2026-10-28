@@ -77,3 +77,103 @@ async def test_cached_proposal_with_irrelevant_refs_is_not_reused(automatic,monk
     result=await resolve_answer(AnswerBook(path),q,job)
     assert result['proposal_state']=='unsupported' and len(calls)==0
     assert 'value' not in result and not result.get('approval_required')
+
+
+@pytest.fixture
+def autonomous(automatic,monkeypatch):
+    path,calls=automatic
+    (path/'settings.json').write_text(json.dumps({'automation_answers':{'enabled':True,'mode':'autonomous'}}))
+    tailored=[]
+    async def tailor(self,aid,settings,*,job):
+        tailored.append((aid,job['url']))
+        row=self.get(aid)
+        if row['field'].get('options'):return {'supported':True,'value':row['field']['options'][-1]['value'],'refs':[]}
+        return {'supported':True,'value':'Tailored for '+job['url'],'refs':['name.full']}
+    monkeypatch.setattr(AnswerBook,'tailor',tailor)
+    return path,calls,tailored
+
+
+async def test_autonomous_choices_are_answered_once_and_reused_without_approval(autonomous):
+    path,calls,tailored=autonomous
+    q={'label':'Como você avalia seu conhecimento com Kotlin Backend?','type':'radio','options':[{'value':'1','text':'Básico'},{'value':'2','text':'Intermediário'}]}
+    metrics={'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
+    first=await resolve_answer(AnswerBook(path),q,{'url':'one','_answer_run_id':'run'},metrics)
+    assert first['source']=='autonomous' and first['value']=='2' and first['answer_id']
+    row=next(r for r in AnswerBook(path).list() if r['id']==first['answer_id'])
+    assert row['state']=='approved' and row['source']=='model'
+    second=await resolve_answer(AnswerBook(path),q,{'url':'two','_answer_run_id':'run'},metrics)
+    assert second['source']=='cache' and second['value']=='2' and len(tailored)==1 and not calls
+
+
+async def test_autonomous_narratives_are_tailored_per_job(autonomous):
+    path,calls,tailored=autonomous
+    q={'label':'Poderia descrever sua experiência prática com Inteligência Artificial?','type':'textarea','options':[]}
+    one=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    again=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    two=await resolve_answer(AnswerBook(path),q,{'url':'two'})
+    assert one['value']==again['value']=='Tailored for one' and two['value']=='Tailored for two'
+    assert len(tailored)==2 and 'answer_id' not in one
+
+
+async def test_autonomous_checkable_facts_need_confirmed_evidence(autonomous,monkeypatch):
+    path,calls,tailored=autonomous
+    async def missing(self,aid,settings,**kwargs):calls.append(aid);return {'supported':False,'reason':'missing_facts'}
+    monkeypatch.setattr(AnswerBook,'propose',missing)
+    q={'label':'Do you have a Bachelor\'s in computer science?','type':'select-one','options':[{'value':'y','text':'Yes'},{'value':'n','text':'No'}]}
+    result=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    assert 'pending' in result and result['proposal_state']=='unsupported' and not tailored and len(calls)==1
+
+
+async def test_autonomous_grounded_fact_proposals_are_accepted(autonomous):
+    path,calls,tailored=autonomous
+    q={'label':'Confirm your full legal name as on your degree','type':'text','options':[]}
+    result=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    assert result['source']=='autonomous' and result['value']=='Test Candidate' and len(calls)==1 and not tailored
+
+
+async def test_unknown_experience_is_not_asked_again_until_facts_change(autonomous,monkeypatch):
+    path,calls,tailored=autonomous
+    async def unknown(self,aid,settings,*,job):tailored.append(aid);return {'supported':False,'reason':'unknown_experience','missing':['Kotlin']}
+    monkeypatch.setattr(AnswerBook,'tailor',unknown)
+    q={'label':'Como você avalia seu conhecimento com Kotlin?','type':'select-one','options':[{'value':'1','text':'Básico'}]}
+    first=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    second=await resolve_answer(AnswerBook(path),q,{'url':'two'})
+    assert 'pending' in first and second['proposal_reason']=='unknown_experience' and len(tailored)==1
+    source=json.loads((path/'confirmed_facts.json').read_text());source['facts'].append({'id':'skills','value':['Kotlin']})
+    (path/'confirmed_facts.json').write_text(json.dumps(source))
+    await resolve_answer(AnswerBook(path),q,{'url':'three'})
+    assert len(tailored)==2
+
+
+async def test_resolve_pending_answers_stored_questions_in_their_job_context(autonomous):
+    from core.automatic_answers import resolve_pending
+    path,calls,tailored=autonomous
+    (path/'jobs.json').write_text(json.dumps({'https://job-boards.greenhouse.io/acme/jobs/1':{'company':'acme','title':'Backend'}}))
+    q={'label':'Why do you want to work here?','type':'textarea','options':[]}
+    job={'url':'https://job-boards.greenhouse.io/acme/jobs/1','eligibility_country':'BR','form_language':'en','company':'acme'}
+    AnswerBook(path).resolve(q,job)
+    seen=[]
+    assert await resolve_pending(path,progress=lambda row,state:seen.append(state))=={'answered':1}
+    assert seen==['answered'] and tailored==[(1,job['url'])]
+    assert (await resolve_answer(AnswerBook(path),q,dict(job)))['value']=='Tailored for '+job['url']
+
+
+async def test_autonomous_fact_proposals_about_unshown_experience_stay_pending(autonomous,monkeypatch):
+    path,calls,tailored=autonomous
+    async def yes(self,aid,settings,**kwargs):
+        with self.store.db() as db:
+            db.execute("UPDATE easy_answers SET state='proposed',proposal=?,refs=?,facts_version=? WHERE id=?",
+                (json.dumps('y'),json.dumps(['name.full']),self.reference_version(['name.full']),aid))
+        return {'supported':True,'value':'y','refs':['name.full']}
+    monkeypatch.setattr(AnswerBook,'propose',yes)
+    q={'label':'Do you have at least 3 years of data engineering experience?','type':'select-one','options':[{'value':'y','text':'Yes'},{'value':'n','text':'No'}]}
+    result=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    assert 'pending' in result and result['proposal_reason']=='unknown_experience'
+
+
+async def test_question_first_stored_as_optional_still_resolves_when_required(autonomous):
+    path,calls,tailored=autonomous
+    q={'label':'How did you hear about this opportunity?','type':'select-one','options':[{'value':'1','text':'LinkedIn'},{'value':'2','text':'Other'}]}
+    AnswerBook(path).resolve(dict(q,required=False),{'url':'one'})
+    result=await resolve_answer(AnswerBook(path),dict(q,required=True),{'url':'two'})
+    assert result['source']=='autonomous' and result['value']=='2'

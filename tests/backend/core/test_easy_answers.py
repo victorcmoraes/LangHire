@@ -1,6 +1,6 @@
 import json
 import pytest
-from core.easy_answers import AnswerBook, sync_profile_facts, valid_value, damaged_text, proposal_fact_sources
+from core.easy_answers import AnswerBook, sync_profile_facts, valid_value, damaged_text, proposal_fact_sources, unknown_terms, asked_text
 from core.application_safety import SafetyError
 
 
@@ -391,3 +391,134 @@ async def test_open_answer_uses_repository_files_and_invalidates_if_evidence_cha
     assert b.resolve(q,{'url':'job'})['source']=='cache'
     record['commit']='two';path.write_text(json.dumps(record))
     assert 'pending' in AnswerBook(tmp_path).resolve(q,{'url':'job'})
+
+
+def test_checkable_facts_are_separated_from_screening_preferences():
+    from core.easy_answers import hard_fact_question
+    for question in ('Do you have the legal right to live and work in the location you are applying for?',
+                     'Do you have 3–5 years of professional backend development with production expertise in Go?',
+                     'What is your current base salary? (in reais)','Have you ever been a Group ABInBev | Ambev employee?',
+                     'Do you know anyone or are you related to anyone who works at Capco?','Qual é a sua raça/etnia?',
+                     'Do you have an active corporate entity (CNPJ)?','Confirm the name of the company where you work'):
+        assert hard_fact_question(question),question
+    for question in ('Qual sua expectativa salarial - CLT?','Como você avalia seu conhecimento com Kotlin Backend?',
+                     'Do you have availability for on-site work at the Campinas office (Brazil) every day?',
+                     'Como ficou sabendo da nossa vaga?','Você se sente confortável trabalhando em um ambiente onde se fala inglês?',
+                     'Are you familiar with Kubernetes?','Você precisa de algum tipo de acessibilidade para participar do processo seletivo?'):
+        assert not hard_fact_question(question),question
+
+
+def test_screening_salary_never_goes_below_the_confirmed_floor(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'salary.minimumBrlMonthly','value':4000}]}))
+    book=AnswerBook(tmp_path);row={'question':'Qual sua expectativa salarial - CLT?','context':{'country':'BR','language':'pt','currency':'','period':''}}
+    assert book.below_salary_floor(row,'3500') and not book.below_salary_floor(row,7000)
+    assert not book.below_salary_floor(dict(row,question='Pretensão taxa hora PJ?'),'90')
+
+
+def test_screening_answers_cannot_claim_what_the_facts_do_not_show(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'skills','value':['Python','Azure']},
+        {'id':'experience.claudeCode','value':True},{'id':'experience.years','value':3}]}))
+    book=AnswerBook(tmp_path);job={'description':'Azure Databricks, Delta Lake and Python pipelines.'};sources=dict(book.facts)
+    def problem(question,value,field_type='textarea',options=(),refs=('skills',)):
+        field={'label':question,'type':field_type,'options':[{'value':o,'text':o} for o in options]}
+        return book.screening_problem({'question':question,'field':field,'context':{}},{'supported':True,'value':value,'refs':list(refs)},sources,job)[0]
+    assert problem('Comente sua experiência com Azure?','Uso Azure com Python em pipelines.') is None
+    assert problem('Comente sua experiência com Azure?','Uso Azure Databricks e Delta Lake.')=='echoed_job_requirements'
+    assert problem('Comente sua experiência com Azure?','Reduzi custos em 40% com Azure.')=='invented_numbers'
+    assert problem('Comente sua experiência com Azure?','Em um projeto recente optei por Azure.')=='invented_story'
+    assert problem('Comente sua experiência com Azure?','https://github.com/someone/repo')=='source_as_value'
+    rails=('Nunca utilizei','Já utilizei em projetos pessoais','Tenho até 1 ano de experiência profissional')
+    assert problem('Qual o seu nível com Ruby on Rails?','Tenho até 1 ano de experiência profissional','select-one',rails)=='unsupported_experience_claim'
+    assert problem('Qual o seu nível com Ruby on Rails?','Já utilizei em projetos pessoais','select-one',rails)=='uncited_experience'
+    assert problem('Ja trabalhou com Claude Code?','Sim','select-one',('Sim','Não'),['experience.claudeCode']) is None
+    assert problem('Ja trabalhou com Claude Code?','Sim','select-one',('Sim','Não'),['experience.years'])=='uncited_experience'
+    assert problem('Do you have experience working at a digital marketing agency?','Yes','select-one',('Yes','No'))=='uncited_experience'
+    assert problem('Have you built pipelines in Snowflake?','Yes','select-one',('Yes','No'))=='unsupported_experience_claim'
+
+
+async def test_missing_experience_is_left_to_the_candidate_without_a_model_call(tmp_path,monkeypatch):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'skills','value':['Java','Azure']},{'id':'experience.claudeCode','value':True}]}))
+    book=AnswerBook(tmp_path)
+    async def no_model(*args,**kwargs):raise AssertionError('model called')
+    monkeypatch.setattr(AnswerBook,'generate',no_model)
+    settings={'ollama':{'model':'qwen3:8b'}}
+    for label,options in [('Como você avalia seu conhecimento com Kotlin Backend?',['Básico','Intermediário']),
+                          ('Have you built pipelines in Snowflake?',['Yes','No']),
+                          ('Qual o seu nível de experiência com a linguagem Ruby on Rails?',['Nunca utilizei','Já utilizei em projetos pessoais'])]:
+        aid=book.resolve({'label':label,'type':'select-one','options':[{'value':o,'text':o} for o in options]},{'url':'job'})['pending']
+        result=await book.tailor(aid,settings,job={'url':'job'})
+        assert result['reason']=='unknown_experience' and result['missing'],label
+
+
+async def test_model_declining_unshown_experience_becomes_pending(tmp_path,monkeypatch):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'skills','value':['Java']}]}))
+    book=AnswerBook(tmp_path);calls=[]
+    async def declines(self,aid,settings,payload,purpose=None):calls.append(purpose);return {'supported':False,'value':None,'refs':[]}
+    monkeypatch.setattr(AnswerBook,'generate',declines)
+    aid=book.resolve({'label':'Do you have experience working at a digital marketing agency?','type':'select-one',
+                      'options':[{'value':'y','text':'Yes'},{'value':'n','text':'No'}]},{'url':'job'})['pending']
+    assert (await book.tailor(aid,{'ollama':{}},job={'url':'job'}))['reason']=='unknown_experience' and calls==['screening']*2
+    aid=book.resolve({'label':'Do you have availability for on-site work every day?','type':'select-one',
+                      'options':[{'value':'y','text':'Yes'},{'value':'n','text':'No'}]},{'url':'job'})['pending']
+    assert (await book.tailor(aid,{'ollama':{}},job={'url':'job'}))['reason']=='model_declined'
+
+
+def test_location_and_current_salary_are_checkable_facts():
+    from core.easy_answers import hard_fact_question
+    for question in ('What is your current location?','Em que cidade reside atualmente?','What is your last/current MONTHLY GROSS salary in Brazilian Real (R$)?'):
+        assert hard_fact_question(question),question
+    assert not hard_fact_question('Are you willing to relocate?')
+
+
+def test_generic_job_words_do_not_count_as_evidence_of_experience(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'experience.ai','value':'I support multiple teams building software with AI models.'},
+        {'id':'experience.years','value':3},{'id':'level.java','value':'advanced'}]}))
+    book=AnswerBook(tmp_path)
+    assert not book.experience_supported('Do you have at least 3 years of data or analytics engineering experience?',['experience.years','experience.ai'])
+    assert not book.experience_supported('Have you designed or maintained a shared/core data model supporting multiple teams?',['experience.ai'])
+    assert book.experience_supported('Como você avalia seu conhecimento com Java 8+?',['level.java'])
+
+
+def test_location_questions_are_answered_from_confirmed_facts(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'location.city','value':'Olinda'},
+        {'id':'location.state','value':'Pernambuco'},{'id':'location.country','value':'Brazil'}]}))
+    book=AnswerBook(tmp_path)
+    countries={'label':'What is your current location?','type':'select-one','options':[{'value':str(i),'text':t} for i,t in enumerate(['Lesotho','Brasil','Chile'])]}
+    assert book.direct(countries,{})['value']=='1'
+    assert book.direct({'label':'Em que cidade reside atualmente?','type':'text','options':[]},{})['value']=='Olinda'
+    assert book.direct({'label':'Where are you based?','type':'text','options':[]},{})['value']=='Olinda, Pernambuco, Brazil'
+
+
+def test_one_shared_word_in_a_long_question_is_not_experience(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'experience.ai','value':'I turn requirements into working code.'}]}))
+    q='Have you designed or maintained a shared/core data model supporting multiple clients, tenants, brands, or business units with recurring custom requirements?'
+    assert not AnswerBook(tmp_path).experience_supported(q,['experience.ai'])
+
+
+def test_preflight_blockers_found_on_real_greenhouse_forms(tmp_path):
+    from core.easy_answers import experience_question,demographic_question
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'skills','value':['PostgreSQL','Python']},
+        {'id':'experience.claudeCode','value':True},{'id':'salary.current','value':{'amount':5000,'currency':'BRL','period':'monthly'}}]}))
+    book=AnswerBook(tmp_path)
+    assert not experience_question('Capco Job Candidate Privacy Notice Acknowledgement')
+    assert book.experience_supported('Tem conhecimento prático em bancos de dados relacionais, especialmente PostgreSQL?',['skills'])
+    assert not book.experience_supported('Have you used Snowflake for relational warehouses?',['skills'])
+    assert unknown_terms(asked_text('Do you use AI coding agents (Cursor, Claude Code, GitHub Copilot, etc.) daily?'),book.known_words()[1])==[]
+    assert demographic_question('Quais grupos você se identifica (uma ou mais respostas):')
+    yes_no=[{'value':'1','text':'Yes'},{'value':'2','text':'No'}]
+    assert book.direct({'label':'Were you referred to this role by a current Capco Employee? If yes, please confirm','type':'select-one','options':yes_no},{})['value']=='2'
+    salary={'label':'What is your current base salary? (in reais)','type':'text','options':[]}
+    assert book.direct(salary,book.context(salary['label'],{'eligibility_country':'BR'}))['value']=='5000'
+    assert book.direct({'label':'What is your current base salary in USD?','type':'text','options':[]},{'currency':'USD'}) is None
+
+
+def test_whole_technology_names_count_as_known(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'skills','value':['PostgreSQL']}]}))
+    assert unknown_terms('Você tem experiência com PostgreSQL?',AnswerBook(tmp_path).known_words()[1])==[]
+
+
+def test_rule_answers_for_multi_select_controls_are_lists(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[]}))
+    field={'label':'How did you hear about this opportunity?','type':'checkbox-group','options':[{'value':'7','text':'Company website'},{'value':'8','text':'LinkedIn'}]}
+    answer=AnswerBook(tmp_path).direct(field,{'discovery_source':'public_greenhouse_board','language':'en'})
+    assert answer['value']==['7']

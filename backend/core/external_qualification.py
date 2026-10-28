@@ -20,6 +20,12 @@ def required_text(description):
     return '\n'.join(lines[start:end]) if start is not None else description
 
 
+def home_cities(facts):
+    """Cities the candidate commutes to; the residence city alone when no list is confirmed."""
+    cities=facts.get('location.commuteCities',{}).get('value') or [facts.get('location.city',{}).get('value')]
+    return [c for c in cities if isinstance(c,str) and c.strip()]
+
+
 def qualify(job,facts):
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
@@ -96,7 +102,7 @@ def qualify(job,facts):
     if location_onsite or title_onsite:remote=False
     if hybrid or (explicit_mode and normalized(explicit_mode[1]) not in remote_modes):remote=False
     if not remote:
-        if not re.search(r'Olinda|Recife',location,re.I):
+        if not any(re.search(r'\b'+re.escape(city)+r'\b',location,re.I) for city in home_cities(facts)):
             if hybrid or explicit_mode or location_onsite or title_onsite or job.get('workplaceType') in ('hybrid','on-site'):
                 return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else title_onsite[0] if title_onsite else job['workplaceType']])
             return result('pending','working_arrangement_needs_evidence',[location])
@@ -104,7 +110,8 @@ def qualify(job,facts):
     explicit_brazil=country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
     if not explicit_brazil:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)])
     salary=job.get('salaryRange') or {}
-    if salary.get('currency')=='BRL' and salary.get('interval') in ('month','monthly') and salary.get('max',999999)<4000:
+    floor=facts.get('salary.minimumBrlMonthly',{}).get('value')
+    if isinstance(floor,(int,float)) and salary.get('currency')=='BRL' and salary.get('interval') in ('month','monthly') and salary.get('max',float('inf'))<floor:
         return result('discarded','published_salary_below_floor',[str(salary)])
     if not description.strip():return result('pending','missing_requirements',[title])
     evidence=[title,location,'country='+str(country),required[:2000]]

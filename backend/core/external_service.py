@@ -169,8 +169,8 @@ async def run_external(data,body,status):
                 'submit_intents':sum(len(store.submissions(a['id'])) for a in attempts),'stop_reason':status.get('stop_reason'),
                 'considered_jobs':len(jobs),'paused_channels':status.get('paused_channels',{}),'job_errors':status.get('job_errors',[]),
                 'preflight':status.get('preflight',[]),
-                'answers':{'rule':0,'cache':0,'pending':0,'model':0}}
-        report['preflight_answers']={key:sum(p['answer_metrics'][key] for p in report['preflight']) for key in ('rule','cache','pending','model')}
+                'answers':{'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}}
+        report['preflight_answers']={key:sum(p['answer_metrics'].get(key,0) for p in report['preflight']) for key in ('rule','cache','pending','model','autonomous')}
         with store.db() as db:
             for a in attempts:
                 for event in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='answer_metrics'",(a['id'],)):

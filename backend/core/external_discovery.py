@@ -12,7 +12,7 @@ from filelock import FileLock
 
 from .application_safety import SafetyError,now,job_key
 from .external_catalog import refresh_board,identity,lever_job
-from .external_qualification import TRACK,qualify,triage
+from .external_qualification import TRACK,home_cities,qualify,triage
 from .easy_answers import AnswerBook
 
 
@@ -47,9 +47,10 @@ def load_boards(data,extra=()):
     return list(unique.values())
 
 
-def candidate_location(job):
+def candidate_location(job,cities=()):
     """Discovery may include ambiguous regional jobs; qualification must still prove eligibility."""
-    return job.get('country')=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b|Recife|Olinda|\bLATAM\b|Latin America',job.get('location',''),re.I))
+    places=[r'\bBrazil\b',r'\bBrasil\b',r'\bLATAM\b','Latin America',*(r'\b'+re.escape(c)+r'\b' for c in cities)]
+    return job.get('country')=='BR' or bool(re.search('|'.join(places),job.get('location',''),re.I))
 
 
 def scoped_board(platform,board,aggregator_pages):
@@ -98,7 +99,7 @@ def discover(data,boards=(),max_new=5000,workers=3,aggregator_pages=5):
             rows,scope=fetched[key];active={identity(j) for j in rows};retained=0;added=0
             for job in rows:
                 ident=identity(job);exists=ident in previous
-                relevant=bool(TRACK.search(job['title'])) and candidate_location(job)
+                relevant=bool(TRACK.search(job['title'])) and candidate_location(job,home_cities(book.facts))
                 if not exists and (not relevant or job_key(job['url']) in known_urls):continue
                 if not exists and new_identities>=max_new:truncated=True;continue
                 if not exists:
