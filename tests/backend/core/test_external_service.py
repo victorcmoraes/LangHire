@@ -33,6 +33,18 @@ def test_ready_preflight_prioritizes_a_fillable_job_without_bypassing_live_check
     assert [j['externalId'] for j in queue(tmp_path)]==['1','2']
 
 
+def test_generic_title_at_another_company_is_not_a_duplicate_and_gh_alias_is_protected(tmp_path):
+    from core.external_service import queue
+    (tmp_path/'external').mkdir()
+    jobs=[{'platform':'greenhouse','source':'greenhouse','board':board,'company':board,'externalId':str(i),
+           'title':'Backend Engineer','url':f'https://job-boards.greenhouse.io/{board}/jobs/{i}'} for i,board in [(1,'one'),(2,'two')]]
+    (tmp_path/'external/catalog.json').write_text(json.dumps({'jobs':jobs}))
+    (tmp_path/'external/triage.json').write_text(json.dumps({'decisions':[dict(j,state='eligible') for j in jobs]}))
+    (tmp_path/'jobs.json').write_text(json.dumps({j['url']:j for j in jobs}))
+    store=AttemptStore(tmp_path);aid=store.begin('https://boards.greenhouse.io/one/jobs/1');store.transition(aid,'confirmed','Receipt')
+    assert [j['externalId'] for j in queue(tmp_path)]==['2']
+
+
 def test_receipt_reconciliation_updates_only_its_own_completed_status(tmp_path):
     from core.external_service import update_reconciled_status
     (tmp_path/'external').mkdir();path=tmp_path/'external/run-state.json'

@@ -28,6 +28,9 @@ def job_key(url):
     host=(parsed.hostname or '').lower().removeprefix('www.')
     match=re.fullmatch(r'/jobs/view/(\d+)/?',parsed.path)
     if host=='linkedin.com' and match:return 'linkedin:'+match[1]
+    match=re.fullmatch(r'/([\w-]+)/jobs/(\d+)(?:/confirmation)?/?',parsed.path)
+    if host in ('boards.greenhouse.io','job-boards.greenhouse.io') and match:
+        return 'greenhouse:'+match[1]+':'+match[2]
     return host+parsed.path.rstrip('/').removesuffix('/apply').rstrip('/')
 
 
@@ -274,6 +277,10 @@ class AttemptStore:
             for aid,kind,payload in ((attempt_id,'verification_continued',{'child_attempt':child}),
                                      (child,'verification_parent',{'parent_attempt':attempt_id,'prior_http_status':428})):
                 db.execute('INSERT INTO events(attempt_id,at,kind,payload) VALUES(?,?,?,?)',(aid,now(),kind,json.dumps(payload)))
+            for row in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='external_batch'",(attempt_id,)).fetchall():
+                batch=json.loads(row[0])
+                db.execute('INSERT INTO events(attempt_id,at,kind,payload) VALUES(?,?,?,?)',
+                    (child,now(),'external_batch',json.dumps({'batch_id':batch['batch_id'],'attempt_id':child})))
         return child
 
     def recover(self):

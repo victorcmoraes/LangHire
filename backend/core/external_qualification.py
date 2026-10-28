@@ -15,17 +15,19 @@ def required_text(description):
     lines=description.splitlines();start=None;end=len(lines)
     for i,line in enumerate(lines):
         n=normalized(line)
-        if start is None and len(n)<110 and re.match(r'^(requirements|requisitos|qualifications|work experience|must have experience|required skills|what you need|who you are|o que esperamos|o que buscamos|what you bring|what we are looking for|what were looking for|requisitos para este|competencias requeridas)\b',n):start=i
-        elif start is not None and re.match(r'^(benefits|beneficios|(?:opcional )?diferenciais|desired|nice to have|bonus|preferred skills|what we offer|english level|legal|o que aumenta|o que oferecemos|you may stand out)\b',n):end=i;break
+        if start is None and len(n)<110 and re.match(r'^(requirements|requisitos|qualifications|work experience|must have experience|required skills|what you need|who you are|o que esperamos|o que buscamos|perfil que buscamos|what you bring|what we are looking for|what were looking for|requisitos para este|competencias requeridas)\b',n):start=i
+        elif start is not None and re.match(r'^(benefits|beneficios|nossos beneficios|(?:opcional )?diferenciais|sera considerado um diferencial|desired|nice to have|bonus|preferred skills|preferred qualifications|what we offer|english level|legal|o que aumenta|o que oferecemos|you may stand out)\b',n):end=i;break
     return '\n'.join(lines[start:end]) if start is not None else description
 
 
 def qualify(job,facts):
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
-        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','location.state','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule']}
+        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','location.state','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule','languages','level.english','level.spanish','level.german','level.french','level.italian','level.mandarin','level.japanese','level.dutch']}
     if not TRACK.search(normalized(title)):return result('discarded','outside_tracks',[title])
     if EXCLUDED.search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
+    if re.search(r'\breact native\b|\bflutter\b|\bswiftui\b',normalized(title)):
+        return result('discarded','mobile_outside_tracks',[title])
     if re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
         return result('discarded','pure_frontend_outside_tracks',[title])
     if re.search(r'exclusiv[ao]|applicants only|afirmativ[ao]|affirmative',normalized(title)):
@@ -33,6 +35,22 @@ def qualify(job,facts):
     if re.search(r'accounting experience',title,re.I) and not facts.get('experience.accounting',{}).get('value'):
         return result('pending','specialized_requirement_needs_evidence',[title])
     years=facts.get('experience.years',{}).get('value')
+    for match in re.finditer(r'(\d+)\s*(?:\+|[-–]\s*\d+)?\s*(?:anos|years)\b',required,re.I):
+        line=required[max(required.rfind('\n',0,match.start())+1,match.start()-100):required.find('\n',match.end()) if '\n' in required[match.end():] else len(required)]
+        if re.search(r'preferred|desej[aá]vel|nice.to.have',line,re.I):continue
+        if not isinstance(years,(int,float)):return result('pending','mandatory_duration_not_confirmed',[line])
+        if int(match[1])>years:return result('discarded','mandatory_duration_above_confirmed',[line])
+    languages={'german':r'German|alem[aã]o','french':r'French|franc[eê]s','italian':r'Italian|italiano',
+               'mandarin':r'Mandarin|mandarim','japanese':r'Japanese|japon[eê]s','dutch':r'Dutch|holand[eê]s'}
+    for language,pattern in languages.items():
+        for line in required.splitlines():
+            if re.search(r'\b(?:'+pattern+r')\b',line,re.I) and not re.search(r'preferred|optional|desej[aá]vel|nice.to.have|advantage|diferencial',line,re.I):
+                if not facts.get('level.'+language,{}).get('value'):return result('pending','mandatory_language_not_confirmed',[line])
+    generic_hours=re.search(r'[^\n]*(?:US business hours|US working hours|hor[aá]rio (?:comercial )?americano)[^\n]*',required,re.I)
+    if generic_hours:
+        accepted=facts.get('availability.schedule',{}).get('value',[])
+        if not isinstance(accepted,list) or normalized(generic_hours[0]) not in [normalized(v) for v in accepted if isinstance(v,str)]:
+            return result('pending','mandatory_schedule_not_confirmed',[generic_hours[0]])
     for line in required.splitlines():
         if re.search(r'preferred|desej[aá]vel|nice.to.have',line,re.I):continue
         if (re.search(r'availability to work|disponibilidade para trabalhar',line,re.I)
@@ -44,7 +62,7 @@ def qualify(job,facts):
         if duration:
             if not isinstance(years,(int,float)):return result('pending','mandatory_duration_not_confirmed',[line])
             if int(duration[1])>years:return result('discarded','mandatory_duration_above_confirmed',[line])
-    niche=re.search(r'\b(?:SAP|FICO|DMPS|ABAP|Workato|Elixir|Scala|Solidity|Rust|Salesforce|Protheus)\b',required,re.I)
+    niche=re.search(r'\b(?:SAP|FICO|DMPS|ABAP|Workato|Elixir|Scala|Solidity|Rust|Salesforce|Protheus|Delphi|COBOL|HubSpot|Service\s*Now|AEM)\b',title+'\n'+required,re.I)
     if niche:return result('pending','specialized_requirement_needs_evidence',[niche[0]])
     if re.search(r'ml engineering[^\n]{0,120}machine learning models in production',required,re.I) and not facts.get('experience.productionML',{}).get('value'):
         return result('pending','specific_production_ml_requirement',[line for line in required.splitlines() if re.search('machine learning models in production',line,re.I)])
@@ -65,20 +83,22 @@ def qualify(job,facts):
         if not (resident_br and (country_wide or covered)):
             return result('pending','explicit_residence_restriction_not_supported',[allowed_locations[0],location])
     # Benefits that mention occasional remote work are not a job's arrangement.
-    explicit_mode=re.search(r'(?:work\s*type|\bmode)\s*:\s*(remote|hybrid|on.?site)',description,re.I)
+    explicit_mode=re.search(r'(?:work\s*type|\bmode|modalidade|modelo(?: de (?:trabalho|atua[çc][ãa]o))?)\s*:\s*(remot[eo]|hybrid|h[íi]brid[oa]|on.?site|presencial)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
     metadata_remote=job.get('platform',job.get('source'))=='lever' and job.get('workplaceType')=='remote'
     # A stated location policy is evidence; a generic country mention or
     # occasional remote-work benefit is not.
     home_policy=re.search(r'(?:can|may) (?:live|work) anywhere in (?:Brazil|Brasil)|(?:pode\w*|possibilidade de) (?:morar|trabalhar) (?:de |em )?qualquer (?:lugar|local) (?:do |no )?Brasil',description,re.I)
-    remote=metadata_remote or bool(re.search(r'remot[eo]|home office',location,re.I)) or bool(explicit_mode and explicit_mode[1].lower()=='remote') or bool(home_policy)
+    remote_modes=('remote','remoto','remota')
+    remote=metadata_remote or bool(re.search(r'\bremot[eo]\b|home office',location+'\n'+title,re.I)) or bool(explicit_mode and normalized(explicit_mode[1]) in remote_modes) or bool(home_policy)
+    title_onsite=re.search(r'\bhybrid\b|hibrid[oa]|on.?site|presencial',normalized(title))
     location_onsite=re.search(r'\bhybrid\b|hibrid[oa]|on.?site|presencial',normalized(location))
-    if location_onsite:remote=False
-    if hybrid or (explicit_mode and explicit_mode[1].lower()!='remote'):remote=False
+    if location_onsite or title_onsite:remote=False
+    if hybrid or (explicit_mode and normalized(explicit_mode[1]) not in remote_modes):remote=False
     if not remote:
         if not re.search(r'Olinda|Recife',location,re.I):
-            if hybrid or explicit_mode or location_onsite or job.get('workplaceType') in ('hybrid','on-site'):
-                return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else job['workplaceType']])
+            if hybrid or explicit_mode or location_onsite or title_onsite or job.get('workplaceType') in ('hybrid','on-site'):
+                return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else title_onsite[0] if title_onsite else job['workplaceType']])
             return result('pending','working_arrangement_needs_evidence',[location])
     country=job.get('country')
     explicit_brazil=country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)

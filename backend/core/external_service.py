@@ -19,6 +19,7 @@ from .external_catalog import identity
 def core_title(title):
     title=re.sub(r'\[[^]]+\]','',title)
     title=re.sub(r'[,|]\s*(?:Brazil|Brasil|Colombia|Argentina)\.?\s*$','',title,flags=re.I)
+    title=re.sub(r'\((?:remote|remoto)\)','',title,flags=re.I)
     return normalized(title)
 
 
@@ -37,7 +38,11 @@ def queue(data):
     all_jobs=json.loads((data/'jobs.json').read_text(encoding='utf-8'))
     known={job_key(url):j for url,j in all_jobs.items()}
     protected={job_key(a['job_url']) for a in store.list() if a['state'] in ('confirmed','uncertain','running','submitted','awaiting_human')}
-    protected_titles={core_title(known[k]['title']) for k in protected if k in known}
+    def company_title(j):return (normalized(j.get('company') or j.get('board') or ''),core_title(j['title']))
+    protected_titles={company_title(known[k]) for k in protected if k in known and company_title(known[k])[0]}
+    named_titles={core_title(known[k]['title']) for k in protected if k in known
+                  and company_title(known[k])[0].replace(' ','') in core_title(known[k]['title']).replace(' ','')
+                  and company_title(known[k])[0]}
     kept=[];isolated=[];seen=set()
     for decision in triage['decisions']:
         if decision['state']!='eligible':continue
@@ -46,7 +51,7 @@ def queue(data):
         title=core_title(job['title'])
         match=re.search(r'\b(?:job[\s-]*)?(\d{5})\b',job['title'],re.I)
         duplicate=(job['board'],match[1]) if match else (job['board'],title)
-        if job_key(job['url']) in protected or title in protected_titles or duplicate in seen:
+        if job_key(job['url']) in protected or company_title(job) in protected_titles or (job.get('board')=='jobgether' and title in named_titles) or duplicate in seen:
             isolated.append({'url':job['url'],'reason':'protected_or_possible_duplicate','title':job['title']});continue
         seen.add(duplicate)
         kept.append(dict(job,external_qualification=decision,
@@ -67,7 +72,18 @@ def queue(data):
     return kept
 
 
-def update_projection(job,result):
+def update_projection(job,result,data=None):
+    if data is not None:
+        path=Path(data)/'jobs.json'
+        with FileLock(str(path)+'.lock'):
+            rows=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+            for old in rows.values():
+                if identity(old)==identity(job):
+                    old.update(status='applied' if result['state']=='confirmed' else 'uncertain' if result['state']=='uncertain' else 'blocked',
+                               external_result=result['state'],attempt_id=result['id'],evidence_dir=result['evidence_dir'],error=result['message'],
+                               applied_at=result['updated_at'] if result['state']=='confirmed' else old.get('applied_at'))
+            temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(rows,ensure_ascii=False,indent=2),encoding='utf-8');temporary.replace(path)
+        return
     from .shared_config import read_jobs,update_job
     for url,old in read_jobs().items():
         if identity(old)==identity(job):
@@ -99,7 +115,7 @@ async def run_external(data,body,status):
     elif body.job_urls:
         selected={canonical_ats(u) for u in body.job_urls};jobs=[j for j in jobs if canonical_ats(j['url']) in selected]
     jobs=jobs[:body.limit or len(jobs)]
-    stop_file=data/'external/stop.json';stop_file.unlink(missing_ok=True)
+    stop_file=data/'external/stop.json'
     def save_status():
         path=data/'external/run-state.json';temporary=path.with_suffix('.tmp')
         temporary.write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8');temporary.replace(path)
@@ -108,9 +124,10 @@ async def run_external(data,body,status):
             if stop_file.exists():status['cancel_requested']=True
             save_status()
             await asyncio.sleep(.5)
-    watcher=asyncio.create_task(watch())
+    watcher=None;lease_acquired=False
     try:
         with FileLock(str(data/'application-worker.lock'),timeout=0):
+            lease_acquired=True;stop_file.unlink(missing_ok=True);watcher=asyncio.create_task(watch())
             store.recover()
             for job in jobs:
                 job=dict(job,_answer_run_id=status['answer_run_id'])
@@ -141,9 +158,10 @@ async def run_external(data,body,status):
                 update_projection(job,result)
                 status.update(stage=result['state'],result=result['state'])
     finally:
-        watcher.cancel()
-        try:await watcher
-        except asyncio.CancelledError:pass
+        if watcher is not None:
+            watcher.cancel()
+            try:await watcher
+            except asyncio.CancelledError:pass
         attempts=[store.get(aid) for aid in owned]
         report={'execution':body.execution,'seconds':round(time.monotonic()-started,2),'daily_remaining':remaining_budget(store),
                 'outcomes':dict(Counter(a['state'] for a in attempts)),
@@ -158,5 +176,6 @@ async def run_external(data,body,status):
                 for event in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='answer_metrics'",(a['id'],)):
                     for key,value in json.loads(event[0]).items():report['answers'][key]+=value
         path=data/'reports'/('external-'+uuid.uuid4().hex+'.json');path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
-        status.update(running=False,report_path=str(path));save_status()
+        status.update(running=False,report_path=str(path))
+        if lease_acquired:save_status()
         print('External report:',path,report['outcomes'],'daily remaining',report['daily_remaining'],flush=True)

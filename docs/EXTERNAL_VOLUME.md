@@ -56,7 +56,8 @@ here)” in an employer's interview-process description is not a receipt.
 
 The first real Greenhouse attempt reached this email-verification precondition
 before support was added, so it remains uncertain and protected. The new
-continuation is fixture-tested, not yet validated with a real confirmation.
+continuation has also completed real confirmations using the authorized local
+Gmail reader. Lost sessions remain protected and are not reconstructed.
 The initial two external applications were independently confirmed on Greenhouse,
 in two companies, with accepted HTTP responses, saved own-job confirmation routes
 and received application emails. Both initially produced false negatives in the

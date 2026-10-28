@@ -19,18 +19,92 @@ from backend.core.external_qualification import triage
 from backend.core.external_catalog import refresh_imported
 
 def main():
+    # Hosted questions can contain any Unicode character, including ATS symbols.
+    # Windows redirected stdout otherwise defaults to a legacy code page.
+    if hasattr(sys.stdout,'reconfigure'):sys.stdout.reconfigure(encoding='utf-8')
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
     for name in ('status','collect','triage','stop'):sub.add_parser(name)
     run=sub.add_parser('run');run.add_argument('--execution',choices=('review','submit'),default='review')
     run.add_argument('--limit',type=int,help='Maximum jobs this run; defaults to the complete eligible queue');run.add_argument('--platform',choices=('lever','greenhouse'))
     run.add_argument('--job-url')
+    discover=sub.add_parser('discover');discover.add_argument('--board',action='append',default=[]);discover.add_argument('--max-new',type=int,default=5000)
+    discover.add_argument('--aggregator-pages',type=int,default=5)
+    batch=sub.add_parser('batch');batch.add_argument('--target',type=int,default=100)
+    batch.add_argument('--execution',choices=('review','submit'));batch.add_argument('--platform',choices=('lever','greenhouse'))
+    batch.add_argument('--collect',action='store_true');batch.add_argument('--board',action='append',default=[])
+    batch.add_argument('--resume');batch.add_argument('--tracker',type=Path)
+    batch_status=sub.add_parser('batch-status');batch_status.add_argument('batch_id')
+    pending=sub.add_parser('pending');pending.add_argument('--batch-id',required=True)
+    approve=sub.add_parser('approve-answer');approve.add_argument('--id',type=int,required=True)
+    value=approve.add_mutually_exclusive_group(required=True);value.add_argument('--text');value.add_argument('--json-value');value.add_argument('--value-file',type=Path)
+    approve.add_argument('--currency');approve.add_argument('--period',choices=('monthly','annual','hourly'))
+    diagnose=sub.add_parser('diagnose-lever');diagnose.add_argument('--job-url',required=True)
     preflight=sub.add_parser('preflight');preflight.add_argument('--limit',type=int,default=50)
     export=sub.add_parser('export');export.add_argument('--tracker',type=Path)
     reconcile=sub.add_parser('reconcile-receipt');reconcile.add_argument('--attempt-id',required=True)
     reconcile.add_argument('--capture',required=True);reconcile.add_argument('--screenshot',required=True)
     reconcile.add_argument('--mail-receipt',required=True)
     args=parser.parse_args();data=get_data_dir();store=AttemptStore(data)
+    if args.command=='approve-answer':
+        from backend.core.easy_answers import AnswerBook
+        if bool(args.currency)!=bool(args.period):parser.error('Currency and period must be supplied together')
+        value=args.text if args.text is not None else json.loads(args.value_file.read_text(encoding='utf-8') if args.value_file else args.json_value)
+        row=AnswerBook(data).approve(args.id,value,{'currency':args.currency,'period':args.period} if args.currency else None)
+        print(json.dumps({'id':row['id'],'state':row['state'],'context':row['context'],'jobs_affected':len(row['jobs'])},ensure_ascii=False,indent=2));return
+    if args.command=='diagnose-lever':
+        from filelock import FileLock
+        import shutil
+        from backend.core.application_safety import SafetyError,job_key,now
+        from backend.core.external_apply import execute_external
+        from backend.core.external_service import update_projection
+        from backend.core.config import load_settings
+        with FileLock(str(data/'application-worker.lock'),timeout=0):
+            triage(data)
+            job=next((j for j in queue(data) if j['platform']=='lever' and job_key(j['url'])==job_key(args.job_url)),None)
+            if not job:raise SafetyError('Diagnostic requires a new eligible Lever job; protected identities cannot be retried')
+            path=data/'external/lever-verification-hold.json';hold=json.loads(path.read_text(encoding='utf-8'))
+            if not hold.get('active') or hold.get('scope')!='submission_diagnostics' or hold.get('account_restriction_confirmed') is not False:
+                raise SafetyError('Only a technical verification hold can be diagnosed; account restrictions remain suspended')
+            backup=data/'backups'/('lever-diagnostic-'+uuid.uuid4().hex);backup.mkdir(parents=True);shutil.copy2(path,backup/path.name)
+            hold.setdefault('diagnostic_allow_once',{})[job_key(job['url'])]={'authorized_at':now(),'reason':'one native submission to diagnose transport; human CAPTCHA; no replay'}
+            temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(hold,ensure_ascii=False,indent=2),encoding='utf-8');temporary.replace(path)
+            result=asyncio.run(execute_external(job,data,load_settings().get('resume_path',''),'submit',{},lease_held=True))
+            update_projection(job,result,data)
+            report={k:result[k] for k in ('id','job_url','state','message','evidence_dir')}
+            report['platform_hold_preserved']=True
+            report_path=data/'reports'/('lever-diagnostic-'+result['id']+'.json');report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+        print(json.dumps(report,ensure_ascii=False,indent=2));return
+    if args.command=='discover':
+        from backend.core.external_discovery import discover as discover_boards
+        report=discover_boards(data,args.board,args.max_new,aggregator_pages=args.aggregator_pages)
+        print(json.dumps({k:v for k,v in report.items() if k not in ('new','boards')},ensure_ascii=False,indent=2));return
+    if args.command in ('batch','batch-status','pending'):
+        from backend.core.external_batch import BatchStore,run_batch
+        batches=BatchStore(data)
+        if args.command=='pending':print(json.dumps(batches.pending(args.batch_id),ensure_ascii=False,indent=2));return
+        if args.command=='batch-status':
+            b=batches.get(args.batch_id)
+            print(json.dumps({'batch_id':b['id'],'state':b['state'],'config':b['config'],'inventory':b['inventory'],
+                'outcomes':dict(Counter(i['state'] for i in b['items']))},ensure_ascii=False,indent=2));return
+        discovery=None
+        if args.resume:
+            if args.collect or args.board:parser.error('Resume uses the persisted batch; collect separately')
+            bid=args.resume
+            saved=batches.get(bid)['config']
+            if args.execution and args.execution!=saved['execution']:parser.error('Execution mode is fixed in the saved batch; create another batch to change it')
+            if args.platform and args.platform!=saved['platform']:parser.error('Platform selection is fixed in the saved batch')
+        else:
+            if args.collect or args.board:
+                from backend.core.external_discovery import discover as discover_boards
+                d=discover_boards(data,args.board);discovery={k:v for k,v in d.items() if k!='new'}
+            bid=batches.create(args.target,args.execution or 'review',args.platform)
+        print('Batch:',bid,flush=True)
+        report=asyncio.run(run_batch(data,bid,discovery=discovery))
+        if args.tracker:
+            from backend.core.external_export import export_confirmed
+            report['export']=export_confirmed(data,args.tracker)
+        print(json.dumps({k:v for k,v in report.items() if k not in ('items','pending_groups','discovery')},ensure_ascii=False,indent=2));return
     if args.command=='preflight':
         from backend.core.greenhouse_apply import preflight_greenhouse
         from backend.core.easy_answers import digest

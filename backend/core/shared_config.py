@@ -123,15 +123,17 @@ def write_jobs(jobs: dict):
         save_json(JOBS_FILE, jobs)
 
 
-def add_collected_job(job: dict) -> bool:
+def add_collected_job(job: dict, data_dir=None) -> bool:
     """Merge discovery without overwriting concurrent approvals or protected records."""
-    with FileLock(JOBS_LOCK):
-        jobs=load_json(JOBS_FILE,{})
+    jobs_file=Path(data_dir)/'jobs.json' if data_dir is not None else JOBS_FILE
+    jobs_lock=str(jobs_file)+'.lock' if data_dir is not None else JOBS_LOCK
+    with FileLock(jobs_lock):
+        jobs=load_json(jobs_file,{})
         match=re.search(r'/jobs/view/(\d+)',job['url'])
         if job['url'] in jobs or (match and any(re.search(r'/jobs/view/'+match[1]+r'(?:/|\?|$)',url) for url in jobs)):
             return False
         jobs[job['url']]=job
-        save_json(JOBS_FILE,jobs)
+        save_json(jobs_file,jobs)
         return True
 
 

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
+from contextlib import asynccontextmanager
 
 from filelock import FileLock
 from .application_safety import AttemptStore, SafetyError, ACTIVE, job_key
@@ -57,9 +58,20 @@ def field_key(field):
     return (field.get('id') or field.get('name') or normalized(field['label']),field['type'])
 
 
-def platform_hold(data,platform):
+def platform_hold(data,platform,job=None):
     path=Path(data)/'external'/(platform+'-verification-hold.json')
-    return path.exists() and json.loads(path.read_text(encoding='utf-8')).get('active',False)
+    if not path.exists():return False
+    hold=json.loads(path.read_text(encoding='utf-8'))
+    if not hold.get('active',False):return False
+    # A diagnosed transport problem may be tested ONCE on an explicitly selected
+    # new job. Account restrictions never have this exception; CAPTCHA stays human.
+    if (job is not None and hold.get('scope')=='submission_diagnostics'
+            and hold.get('account_restriction_confirmed') is False
+            and job_key(job['url']) in hold.get('diagnostic_allow_once',{})):
+        store=AttemptStore(Path(data))
+        previous=[a for a in store.list() if job_key(a['job_url'])==job_key(job['url'])]
+        if not any(store.submissions(a['id']) for a in previous):return False
+    return True
 
 
 class LeverAdapter:
@@ -139,7 +151,7 @@ class LeverAdapter:
 
     async def fill(self):
         self.stage('fill_external')
-        missing=[]
+        missing=[];pending=[]
         for original in await self.inspect():
             current=[f for f in await self.inspect() if field_key(f)==field_key(original)]
             if not current:continue  # A conditional control may have disappeared.
@@ -157,7 +169,8 @@ class LeverAdapter:
                 answer=self.book.direct(field,self.book.context(field['label'],self.job))
                 if answer is None:continue
             if field['type'] not in ('text','email','tel','number','url','textarea','select-one','checkbox','radio','location'):
-                if field['required']:missing.append('Unsupported control: '+field['label'])
+                if field['required']:
+                    missing.append('Unsupported control: '+field['label']);pending.append({'question':field['label'],'reason':'unsupported_required_control','control':field['type']})
                 continue
             if field['type']=='location':
                 value=self.book.facts.get('location.city',{}).get('value')
@@ -166,9 +179,12 @@ class LeverAdapter:
                 from .automatic_answers import resolve_answer
                 answer=answer or await resolve_answer(self.book,field,self.job,self.metrics)
             self.metrics[answer['source']]+=1
-            if 'pending' in answer:missing.append(str(answer['pending']));continue
+            if 'pending' in answer:
+                missing.append(str(answer['pending']));pending.append({'question':field['label'],'answer_id':answer['pending'],'reason':answer.get('proposal_reason','unconfirmed_answer')});continue
             await self.set(field,answer)
-        if missing:raise SafetyError('Unresolved external questions: '+', '.join(missing))
+        if missing:
+            (self.directory/'pending-answers.json').write_text(json.dumps(pending,ensure_ascii=False,indent=2),encoding='utf-8')
+            raise SafetyError('Unresolved external questions: '+', '.join(missing))
         if not self.resume_verified:raise SafetyError('No verified configured resume')
 
     async def review(self):
@@ -234,16 +250,24 @@ class LeverAdapter:
         await self.monitor.finalize()
 
 
-async def execute_external(job,data,resume,execution='review',status=None,lease_held=False):
+@asynccontextmanager
+async def application_browser(data,existing=None):
+    if existing is not None:yield existing
+    else:
+        async with persistent_browser(data) as session:yield session
+
+
+async def execute_external(job,data,resume,execution='review',status=None,lease_held=False,session=None):
     from contextlib import nullcontext
     data=Path(data);job=dict(job,url=canonical_ats(job['url']),eligibility_country='BR',form_language='en')
     contact=data/'pending-contact-verification.json'
     if execution=='submit' and contact.exists() and json.loads(contact.read_text(encoding='utf-8')).get('active'):
         raise SafetyError('Candidate email confirmation pending; no additional send')
-    if execution=='submit' and platform_hold(data,job['platform']):
+    if execution=='submit' and platform_hold(data,job['platform'],job):
         raise SafetyError('Platform submissions paused for verification diagnosis: '+job['platform'])
     with (nullcontext() if lease_held else FileLock(str(data/'application-worker.lock'),timeout=0)):
         store=AttemptStore(data);store.recover();aid=store.begin(job['url'])
+        if job.get('_batch_id'):store.event(aid,'external_batch',{'batch_id':job['_batch_id'],'attempt_id':aid})
         if job.get('external_qualification'):store.event(aid,'external_qualification',job['external_qualification'])
         try:
             if job['platform'] not in ('lever','greenhouse'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
@@ -251,11 +275,11 @@ async def execute_external(job,data,resume,execution='review',status=None,lease_
             if job['platform']=='greenhouse':
                 from .greenhouse_apply import GreenhouseAdapter
                 adapter_type=GreenhouseAdapter
-            async with persistent_browser(data) as session:
+            async with application_browser(data,session) as active_session:
                 monitor=SubmissionMonitor(store,aid,cancel=status)
                 adapter=None
                 try:
-                    await monitor.attach(session)
+                    await monitor.attach(active_session)
                     adapter=adapter_type(monitor.contexts[0].pages[0],job,data,aid,monitor,status)
                     await adapter.run(resume,execution)
                 except BaseException as error:

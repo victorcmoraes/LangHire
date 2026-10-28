@@ -6,6 +6,21 @@ from core.external_apply import LeverAdapter,canonical_ats,execute_external
 from core.application_safety import AttemptStore,SafetyError
 from core.submission_monitor import SubmissionMonitor
 
+
+def test_technical_hold_allows_only_one_exact_diagnostic_and_never_an_account_restriction(tmp_path):
+    from core.external_apply import platform_hold
+    from core.application_safety import job_key
+    (tmp_path/'external').mkdir();url='https://jobs.lever.co/fixture/00000000-0000-0000-0000-000000000001'
+    job={'url':url};path=tmp_path/'external/lever-verification-hold.json'
+    hold={'active':True,'scope':'submission_diagnostics','account_restriction_confirmed':False,'diagnostic_allow_once':{job_key(url):{'reason':'operator diagnostic'}}}
+    path.write_text(json.dumps(hold))
+    assert platform_hold(tmp_path,'lever') and not platform_hold(tmp_path,'lever',job)
+    assert platform_hold(tmp_path,'lever',{'url':url.replace('000000000001','000000000002')})
+    store=AttemptStore(tmp_path);aid=store.begin(url);store.intent(aid,'one',url)
+    assert platform_hold(tmp_path,'lever',job)
+    hold['account_restriction_confirmed']=True;path.write_text(json.dumps(hold))
+    assert platform_hold(tmp_path,'lever',job)
+
 URL='https://jobs.lever.co/fixture/00000000-0000-0000-0000-000000000001'
 
 

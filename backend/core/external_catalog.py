@@ -11,12 +11,17 @@ import urllib.request
 
 class Text(HTMLParser):
     def __init__(self):super().__init__();self.parts=[]
+    def handle_starttag(self,tag,attrs):
+        if tag in ('p','li','div','br','h1','h2','h3','h4','h5','section'):self.parts.append('\n')
+    def handle_endtag(self,tag):
+        if tag in ('p','li','div','h1','h2','h3','h4','h5','section'):self.parts.append('\n')
     def handle_data(self,data):self.parts.append(data)
 
 
 def plain(html):
     parser=Text();parser.feed(unescape(html or ''))
-    return re.sub(r'\n{3,}','\n\n','\n'.join(p.strip() for p in parser.parts if p.strip()))
+    text=''.join(parser.parts).replace('\r\n','\n')
+    return re.sub(r'\n{3,}','\n\n','\n'.join(re.sub(r'[ \t]+',' ',line).strip() for line in text.splitlines())).strip()
 
 
 def identity(job):

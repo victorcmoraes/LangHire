@@ -47,11 +47,11 @@ async def test_missing_facts_are_not_retried_until_the_facts_change(automatic,mo
     q={'label':'Your professional notice period?','type':'number','options':[]};job={'url':'one'}
     assert (await resolve_answer(AnswerBook(path),q,job))['proposal_state']=='unsupported'
     await resolve_answer(AnswerBook(path),q,dict(job,_answer_run_id='another'))
-    assert len(calls)==1
+    assert len(calls)==0
     source=json.loads((path/'confirmed_facts.json').read_text());source['facts'].append({'id':'availability.notice','value':14,'source':'user'})
     (path/'confirmed_facts.json').write_text(json.dumps(source))
     await resolve_answer(AnswerBook(path),q,dict(job,_answer_run_id='third'))
-    assert len(calls)==2
+    assert len(calls)==1
 
 
 async def test_run_budget_and_local_provider_are_enforced(automatic):
@@ -75,5 +75,5 @@ async def test_cached_proposal_with_irrelevant_refs_is_not_reused(automatic,monk
         calls.append(aid);return {'supported':False,'reason':'missing_facts'}
     monkeypatch.setattr(AnswerBook,'propose',missing)
     result=await resolve_answer(AnswerBook(path),q,job)
-    assert result['proposal_state']=='unsupported' and len(calls)==1
+    assert result['proposal_state']=='unsupported' and len(calls)==0
     assert 'value' not in result and not result.get('approval_required')

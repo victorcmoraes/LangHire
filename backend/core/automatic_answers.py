@@ -38,6 +38,8 @@ async def resolve_answer(book,field,job,metrics=None):
         return dict(answer,proposal_state='qwen3_8b_not_configured')
     aid=answer['pending'];row=next(r for r in book.list() if r['id']==aid)
     allowed=proposal_fact_sources(row['question'],row['context'],book.facts|book.project_evidence)
+    if not allowed:
+        return dict(answer,proposal_state='unsupported',proposal_reason='missing_facts')
     if (row['state']=='proposed' and row['facts_version']==book.reference_version(row['refs'])
             and row['refs'] and all(ref in allowed for ref in row['refs'])
             and valid_value(row['field'],row['proposal'])):

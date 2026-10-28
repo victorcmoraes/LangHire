@@ -36,6 +36,30 @@ def test_explicit_remote_work_type_is_supported():
     assert qualify(job('Requirements:\nJava\nWork Type:\nRemote',location='Brazil, Colombia'),FACTS)['state']=='eligible'
 
 
+def test_mobile_titles_and_specialized_vendor_requirements_do_not_pass_bulk_triage():
+    for title in ['Desenvolvedor React-native - Sênior','Software Developer - Flutter']:
+        assert qualify(job('Requirements:\n3 years of development',title=title),FACTS)['state']=='discarded'
+    for title in ['Desenvolvedor ServiceNow Sênior','Desenvolvedor HubSpot','Delphi Developer']:
+        assert qualify(job('Requirements:\n3 years of development',title=title),FACTS)['state']=='pending'
+
+
+def test_inline_html_and_wrapped_requirements_preserve_mandatory_years_and_language():
+    from core.external_catalog import plain
+    text=plain('<h2>Requirements</h2><ul><li>Minimum <strong>5</strong> years of development</li></ul><h2>Benefits</h2><p>Remote work</p>')
+    assert 'Minimum 5 years' in text
+    assert qualify(job(text),FACTS)['reason']=='mandatory_duration_above_confirmed'
+    assert qualify(job('Requirements:\nMinimum 5\nyears of development'),FACTS)['state']=='discarded'
+    assert qualify(job('Requirements:\nVery good German and English'),FACTS)['reason']=='mandatory_language_not_confirmed'
+    assert qualify(job('Requirements:\nJava\nNice to have:\nGerman'),FACTS)['state']=='eligible'
+    assert qualify(job('Requirements:\nAbility to work according to US business hours'),FACTS)['reason']=='mandatory_schedule_not_confirmed'
+
+
+def test_explicit_title_and_portuguese_mode_are_job_evidence_but_hybrid_is_not_remote():
+    assert qualify(job('Requirements:\nJava',title='Backend Developer - Remoto',location='Brazil - Sao Paulo'),FACTS)['state']=='eligible'
+    assert qualify(job('Requirements:\nJava\nModalidade: Remoto',location='Brazil - Sao Paulo'),FACTS)['state']=='eligible'
+    assert qualify(job('Requirements:\nJava\nModalidade: Híbrido 2x na semana',title='Backend Developer - Remoto',location='Brazil - Sao Paulo'),FACTS)['state']=='discarded'
+
+
 def test_remote_does_not_override_explicit_eligible_residence_locations():
     facts=FACTS|{'location.country':{'value':'Brazil'},'location.city':{'value':'Olinda'},'location.state':{'value':'Pernambuco'}}
     description='Requirements:\nJava\nWork Type:\nRemote\nEligible Locations:\nSão Paulo or Rio de Janeiro, Brazil\nLegal & Hiring Information'

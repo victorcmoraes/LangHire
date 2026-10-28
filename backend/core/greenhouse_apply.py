@@ -217,7 +217,7 @@ class GreenhouseAdapter:
         self.used.append({'question':field['label'],'value':self.resume.name,'sha256':self.resume_hash,'refs':['configured_resume'],'source':'rule'})
 
     async def fill(self):
-        self.stage('fill_external');missing=[]
+        self.stage('fill_external');missing=[];pending=[]
         for field in await self.inspect():
             if field.get('category')=='demographic-consent':continue  # Resolve after survey choices are accepted.
             if not field['present']:
@@ -228,12 +228,14 @@ class GreenhouseAdapter:
             # leave a phone entered without its own verified country selection.
             if field['id']=='phone' and not field['required']:continue
             if field['type'] not in ('text','textarea','select-one','checkbox','checkbox-group','phone-country','location'):
-                if field['required']:missing.append('Unsupported control: '+field['label'])
+                if field['required']:
+                    missing.append('Unsupported control: '+field['label']);pending.append({'question':field['label'],'reason':'unsupported_required_control','control':field['type']})
                 continue
             answer=await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))
             if not answer:continue
             self.metrics[answer['source']]+=1
-            if 'pending' in answer:missing.append(str(answer['pending']));continue
+            if 'pending' in answer:
+                missing.append(str(answer['pending']));pending.append({'question':field['label'],'answer_id':answer['pending'],'reason':answer.get('proposal_reason','unconfirmed_answer')});continue
             await self.set(field,answer)
         for field in await self.inspect():
             if field.get('category')!='demographic-consent':continue
@@ -241,6 +243,7 @@ class GreenhouseAdapter:
             if 'pending' in answer:missing.append(str(answer['pending']))
             else:await self.set(field,answer)
         if missing:
+            (self.directory/'pending-answers.json').write_text(json.dumps(pending,ensure_ascii=False,indent=2),encoding='utf-8')
             (self.directory/'unresolved-controls.json').write_text(json.dumps(await self.inspect(),ensure_ascii=False,indent=2),encoding='utf-8')
             raise SafetyError('Unresolved Greenhouse questions: '+', '.join(missing))
         if not self.resume_verified:raise SafetyError('No configured PDF attachment verified')

@@ -63,6 +63,20 @@ def test_direct_facts_bypass_model_but_never_infer_years(tmp_path):
     assert 'pending' in b.resolve(field(),j)
 
 
+def test_current_employer_bilingual_label_is_not_previous_employment(tmp_path):
+    b=book(tmp_path)
+    source=json.loads((tmp_path/'confirmed_facts.json').read_text())
+    source['facts'].append({'id':'employer.current','value':'Example Consulting','source':'user'})
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps(source))
+    b=AnswerBook(tmp_path)
+    label='Confirm the name of the company where you work/ Confirme o nome da empresa em que você trabalha atualmente\n✱'
+    answer=b.resolve({'label':label,'type':'text','options':[]},{'url':'job'})
+    assert answer['value']=='Example Consulting'
+    assert answer['refs']==['employer.current']
+    for other in ('Previous company','Capco employee email address'):
+        assert 'pending' in b.resolve({'label':other,'type':'text','options':[]},{'url':'job'})
+
+
 def test_ats_option_ids_share_one_pending_and_remap_one_approval(tmp_path):
     b=book(tmp_path);job={'url':'job1','eligibility_country':'BR','form_language':'en','company':'Example'}
     first={'label':'Have you previously worked at this company?','type':'select-one',
