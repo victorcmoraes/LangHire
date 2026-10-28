@@ -62,3 +62,18 @@ async def test_run_budget_and_local_provider_are_enforced(automatic):
     (path/'llm_settings.json').write_text(json.dumps({'provider':'openai'}))
     result=await resolve_answer(AnswerBook(path),{'label':'Another question','type':'text'},{'url':'other'})
     assert result['proposal_state']=='local_model_not_configured' and len(calls)==2
+
+
+async def test_cached_proposal_with_irrelevant_refs_is_not_reused(automatic,monkeypatch):
+    path,calls=automatic;book=AnswerBook(path)
+    q={'label':'Your professional notice period?','type':'text','options':[]};job={'url':'job'}
+    aid=book.resolve(q,job)['pending']
+    with book.store.db() as db:
+        db.execute("UPDATE easy_answers SET state='proposed',proposal=?,refs=?,facts_version=? WHERE id=?",
+            (json.dumps('Immediately'),json.dumps(['name.full']),book.reference_version(['name.full']),aid))
+    async def missing(self,aid,settings,**kwargs):
+        calls.append(aid);return {'supported':False,'reason':'missing_facts'}
+    monkeypatch.setattr(AnswerBook,'propose',missing)
+    result=await resolve_answer(AnswerBook(path),q,job)
+    assert result['proposal_state']=='unsupported' and len(calls)==1
+    assert 'value' not in result and not result.get('approval_required')

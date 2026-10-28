@@ -24,12 +24,18 @@ run separately. Imported job identities and protected attempts are preserved.
 Greenhouse preflight resolves required questions from public form schemas before
 opening Chrome or uploading a resume. Unsupported mandatory controls and unknown
 facts remain pending. Form review then checks the live controls independently.
+Remote work does not establish eligibility for every city: an explicit eligible
+locations list must cover the candidate's confirmed residence. Otherwise the job
+is held even if its form can be filled completely.
 Current coverage includes ordinary text, React single selects and the configured
 PDF, native checkbox groups, React multiple selects, phone calling codes and
 city/state/country autocomplete. Location and demographic schema sections are
 included in preflight. Demographic questions use an explicit decline option,
 without inferring a personal attribute. Their required processing checkbox is
-accepted only when all survey responses decline disclosure. A selected file input
+accepted only when all survey responses decline disclosure.
+The native, schema-required checkbox for processing the current application is
+handled separately; retention for future vacancies and marketing are not opted in.
+A selected file input
 may disappear after the hosted uploader accepts the attachment. Uploader setup
 must finish before choosing a file. A resume is never attached as a cover letter.
 

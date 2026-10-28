@@ -36,6 +36,26 @@ def test_explicit_remote_work_type_is_supported():
     assert qualify(job('Requirements:\nJava\nWork Type:\nRemote',location='Brazil, Colombia'),FACTS)['state']=='eligible'
 
 
+def test_remote_does_not_override_explicit_eligible_residence_locations():
+    facts=FACTS|{'location.country':{'value':'Brazil'},'location.city':{'value':'Olinda'},'location.state':{'value':'Pernambuco'}}
+    description='Requirements:\nJava\nWork Type:\nRemote\nEligible Locations:\nSão Paulo or Rio de Janeiro, Brazil\nLegal & Hiring Information'
+    result=qualify(job(description,location='São Paulo or Rio de Janeiro, Brazil'),facts)
+    assert result['state']=='pending' and result['reason']=='explicit_residence_restriction_not_supported'
+    assert 'Eligible Locations:' in result['evidence'][0]
+    assert 'location.state' in result['fact_refs']
+    assert qualify(job(description),facts|{'location.city':{'value':'São Paulo'}})['state']=='eligible'
+    assert qualify(job(description.replace('São Paulo or Rio de Janeiro, Brazil','Pernambuco, Brazil')),facts)['state']=='eligible'
+    assert qualify(job(description.replace('São Paulo or Rio de Janeiro, Brazil','Brazil')),facts)['state']=='eligible'
+    assert qualify(job(description),FACTS)['state']=='pending'
+
+
+def test_country_mention_and_matching_city_substring_do_not_prove_allowed_residence():
+    facts=FACTS|{'location.country':{'value':'Brazil'},'location.city':{'value':'Rio'},'location.state':{'value':'Pernambuco'}}
+    result=qualify(job('Requirements:\nJava\nEligible Locations: Rio Grande, Brazil'),facts)
+    # A city name prefix is not an exact place identity; keep this ambiguous.
+    assert result['state']=='pending'
+
+
 def test_required_specific_schedule_is_not_inferred_from_technology_experience():
     line='Availability to work until 3:00 PM CST.'
     assert qualify(job('Requirements:\nJava\n'+line),FACTS)['reason']=='mandatory_schedule_not_confirmed'

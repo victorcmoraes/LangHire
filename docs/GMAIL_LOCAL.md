@@ -111,6 +111,19 @@ serve como contexto e não prova experiência do candidato. Fatos com escopo de
 outra empresa são excluídos quando necessário. Uma aprovação humana recebida
 durante a inferência não é sobrescrita pelo resultado do modelo.
 
+Perguntas factuais sobre início, consentimento, remuneração variável, parentesco,
+vínculos anteriores, GPA e origem da oportunidade exigem fontes da categoria
+correspondente. O emprego atual não comprova disponibilidade imediata ou ausência
+de vínculos anteriores. Consentimentos e parentescos respeitam o escopo da empresa;
+salários exigem moeda e período definidos. Propostas antigas com referências
+incompatíveis não são reaproveitadas. Disponibilidade imediata explicitamente
+confirmada é resolvida por regra, sem inferência.
+
+No formulário hospedado Greenhouse, o consentimento obrigatório para processar
+os dados da candidatura atual é reconhecido pelo esquema e pelo controle nativo.
+Esse reconhecimento não inclui retenção para futuras vagas, publicidade ou SMS.
+Controles desconhecidos continuam bloqueando a revisão.
+
 Essa integração está no código-fonte/CLI. O acesso real ao Gmail depende da
 configuração e autorização acima; testes com respostas simuladas não substituem
 uma validação em candidatura real.

@@ -137,11 +137,16 @@ class GreenhouseAdapter:
                 any(str(v)==o['value'] and o.get('decline_to_answer') is True for o in f['options'])
                 for v in (f['value'] if isinstance(f['value'],list) else [f['value']]))) for f in demographics)
         has_consent=any(c.get('demographic_data_consent_applies') is True for c in self.schema.get('data_compliance',[]))
+        requires_processing=any(c.get('requires_processing_consent') is True for c in self.schema.get('data_compliance',[]))
         for e in unknown:
             field={'id':e['id'],'name':e['name'],'label':e['label'],'type':'unsupported','required':True,'present':True,'value':'','options':[]}
             if (has_consent and e['type']=='checkbox' and e['id']
                     and re.search(r'consent.{0,180}process.{0,80}demographic data|consinto.{0,180}process.{0,80}dados demograficos',normalized(e['label']),re.I)):
                 field.update(type='checkbox',category='demographic-consent',declines_only=declines_only,value=e['checked'])
+            elif (requires_processing and e['type']=='checkbox' and e['name']=='gdpr_processing_consent_given'
+                    and re.fullmatch(r'gdpr_processing_consent_given_\d+',e['id'])
+                    and re.search(r'store and process my data.{0,130}current application for employment',normalized(e['label']))):
+                field.update(type='checkbox',category='application-processing-consent',current_application_only=True,value=e['checked'])
             fields.append(field)
         return fields
 
@@ -222,7 +227,7 @@ class GreenhouseAdapter:
             # The optional phone's country picker is a separate control; do not
             # leave a phone entered without its own verified country selection.
             if field['id']=='phone' and not field['required']:continue
-            if field['type'] not in ('text','textarea','select-one','checkbox-group','phone-country','location'):
+            if field['type'] not in ('text','textarea','select-one','checkbox','checkbox-group','phone-country','location'):
                 if field['required']:missing.append('Unsupported control: '+field['label'])
                 continue
             answer=await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))

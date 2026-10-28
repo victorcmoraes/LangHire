@@ -82,6 +82,39 @@ async def test_greenhouse_unknown_required_field_never_sends(hosted_gh):
     assert not received and not store.submissions(aid)
 
 
+@pytest.mark.parametrize('schema_requires_processing,label,ready',[
+    (True,'By checking this box, I agree to allow Fixture to store and process my data for the purpose of considering my eligibility regarding my current application for employment.*',True),
+    (False,'By checking this box, I agree to allow Fixture to store and process my data for my current application for employment.',False),
+    (True,'I agree to retain my data for future opportunities and marketing messages.',False),
+])
+async def test_required_native_processing_consent_is_distinct_from_retention_and_marketing(hosted_gh,schema_requires_processing,label,ready):
+    adapter,pdf,received,store,aid,page,_=hosted_gh
+    load=adapter.load_schema
+    async def load_processing():
+        await load()
+        adapter.schema['data_compliance']=[{'requires_processing_consent':schema_requires_processing,'requires_retention_consent':True}]
+    adapter.load_schema=load_processing
+    fill=adapter.fill
+    async def fill_processing():
+        await page.locator('#application-form').evaluate('''(f,label)=>{
+            const l=document.createElement('label');l.htmlFor='gdpr_processing_consent_given_1';l.textContent=label;f.append(l);
+            const input=document.createElement('input');input.type='checkbox';input.id=l.htmlFor;input.name='gdpr_processing_consent_given';input.required=true;f.append(input);
+            const retention=document.createElement('input');retention.type='checkbox';retention.id='gdpr_retention_consent_given_1';retention.name='gdpr_retention_consent_given';f.append(retention);
+        }''',label)
+        await fill()
+    adapter.fill=fill_processing
+    if ready:
+        await adapter.run(pdf,'review')
+        assert (await adapter.review())['ready']
+        assert await page.locator('#gdpr_processing_consent_given_1').is_checked()
+        await page.locator('#gdpr_processing_consent_given_1').uncheck()
+        assert not (await adapter.review())['ready']
+    else:
+        with pytest.raises(SafetyError,match='Unsupported control'):await adapter.run(pdf,'review')
+    assert not await page.locator('#gdpr_retention_consent_given_1').is_checked()
+    assert not received and not store.submissions(aid)
+
+
 async def test_checkbox_group_uses_native_controls_and_detects_changed_approval(hosted_gh):
     adapter,pdf,received,store,aid,page,_=hosted_gh
     label='Acknowledgement of the reviewed notice'

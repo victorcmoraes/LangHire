@@ -23,7 +23,7 @@ def required_text(description):
 def qualify(job,facts):
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
-        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule']}
+        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','location.state','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule']}
     if not TRACK.search(normalized(title)):return result('discarded','outside_tracks',[title])
     if EXCLUDED.search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
     if re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
@@ -53,6 +53,17 @@ def qualify(job,facts):
     if re.search(r'(?:production.*LangGraph|LangGraph.*production)',required,re.I):
         return result('pending','specific_production_agent_requirement',[line for line in required.splitlines() if 'LangGraph' in line][:2])
     location=job.get('location','')
+    # A remote arrangement does not override an explicit residence restriction.
+    allowed_locations=re.search(r'(?:eligible locations?|allowed locations?|localidades eleg[ií]veis|localiza[çc][õo]es eleg[ií]veis)[ \t]*:[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)',description,re.I)
+    if allowed_locations:
+        places=normalized(allowed_locations[1])
+        country_wide=places in ('br','brasil','brazil','anywhere in brazil','anywhere in brasil','todo o brasil')
+        resident_br=normalized(facts.get('location.country',{}).get('value','')) in ('br','brasil','brazil')
+        candidate_places=[normalized(facts.get(key,{}).get('value','')) for key in ('location.city','location.state')]
+        listed_places={normalized(p) for p in re.split(r'[,;/|]|\b(?:or|and|ou|e)\b',allowed_locations[1],flags=re.I)}
+        covered=any(p and p in listed_places for p in candidate_places)
+        if not (resident_br and (country_wide or covered)):
+            return result('pending','explicit_residence_restriction_not_supported',[allowed_locations[0],location])
     # Benefits that mention occasional remote work are not a job's arrangement.
     explicit_mode=re.search(r'(?:work\s*type|\bmode)\s*:\s*(remote|hybrid|on.?site)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
@@ -77,6 +88,7 @@ def qualify(job,facts):
         return result('discarded','published_salary_below_floor',[str(salary)])
     if not description.strip():return result('pending','missing_requirements',[title])
     evidence=[title,location,'country='+str(country),required[:2000]]
+    if allowed_locations:evidence.append(allowed_locations[0])
     if home_policy:evidence.append(home_policy[0])
     return result('eligible','requirements_supported_and_brazil_location',evidence)
 

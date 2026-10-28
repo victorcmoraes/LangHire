@@ -52,6 +52,40 @@ def salary_question(question):
     return bool(re.search(r'salary|salari|remunera|pretensao|renda|taxa hora', normalized(question)))
 
 
+def proposal_fact_sources(question, context, sources):
+    """Constrain factual proposals to evidence for the actual requested fact."""
+    q = normalized(question)
+    if re.search(r'variable compensation|bonus|commissions|stock options|\brsus\b|remuneracao variavel', q):
+        return {k:v for k,v in sources.items() if k.startswith(('salary.variable', 'compensation.variable'))}
+    if salary_question(question):
+        if not context.get('currency') or not context.get('period'):return {}
+        if re.search(r'current|atual', q):return {k:v for k,v in sources.items() if k in ('salary.current', 'income.current')}
+        return {k:v for k,v in sources.items() if k.startswith(('salary.', 'income.', 'compensation.'))}
+    if re.search(r'available.{0,40}(?:begin|start)|when.{0,40}(?:begin work|start work)|notice period|disponibilidade|quando.{0,40}(?:comec|inici)', q):
+        return {k:v for k,v in sources.items() if k.startswith('availability.')}
+    if re.search(r'consent|opt in|receive text messages|consentimento', q):
+        company = normalized(context.get('company', ''))
+        return {k:v for k,v in sources.items() if k.startswith('consent.')
+                and company and normalized(v.get('scope','')) == company}
+    if re.search(r'relatives?|family.{0,40}(?:work|employ)|parentesc|familiar.{0,40}trabalh', q):
+        company = normalized(context.get('company', ''))
+        return {k:v for k,v in sources.items() if k.startswith('relationships.')
+                and company and normalized(v.get('scope','')) == company}
+    if re.search(r'\bgpa\b|coeficiente de rendimento|\bira\b', q):
+        return {k:v for k,v in sources.items() if k in ('education.gpa','education.ira')}
+    if re.search(r'conflicts? of interest|conflito de interesse|if you checked any of the options above', q):
+        company = normalized(context.get('company', ''))
+        return {k:v for k,v in sources.items() if k.startswith(('conflict.', 'relationships.conflict'))
+                and company and normalized(v.get('scope','')) == company}
+    if re.search(r'how did you hear|como (?:soube|ficou sabendo|conheceu)|if it is from an event|if you clicked other', q):
+        return {k:v for k,v in sources.items() if k.startswith('application.discovery.')}
+    if re.search(r'(?:ever|previously|prior|formerly).{0,70}(?:employ|work|contract)|ja.{0,30}(?:trabalh|prestou)', q):
+        company = normalized(context.get('company', ''))
+        return {k:v for k,v in sources.items() if k.startswith('employment.')
+                and company and normalized(v.get('scope', k.removeprefix('employment.affiliation.'))) == company}
+    return sources
+
+
 def damaged_text(value):
     """Catch lossy Windows pipe encoding and typical UTF-8 decoding corruption."""
     if not isinstance(value,str):return False
@@ -158,6 +192,16 @@ class AnswerBook:
 
     def direct(self, field, context):
         q = normalized(field['label'])
+        if field.get('category')=='application-processing-consent':
+            if field['type']=='checkbox' and field.get('current_application_only') is True:
+                return {'value':True,'refs':[],'source':'rule'}
+            return None
+        if re.search(r'available.{0,40}(?:begin|start)|when.{0,40}(?:begin work|start work)|disponibilidade.{0,30}(?:inici|comec)|quando.{0,40}(?:comec|inici)', q):
+            if self.facts.get('availability.immediate', {}).get('value') is True:
+                choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('immediately','immediate','imediato','imediata','imediatamente','inicio imediato')]
+                if len(choices)==1:return {'value':choices[0],'refs':['availability.immediate'],'source':'rule'}
+                if not field.get('options') and field['type'] in ('text','textarea'):
+                    return {'value':'Imediato' if context.get('language')=='pt' else 'Immediately', 'refs':['availability.immediate'],'source':'rule'}
         if field.get('category')=='demographic-consent':
             if field.get('declines_only') is True and field['type']=='checkbox':
                 return {'value':True,'refs':[],'source':'rule'}
@@ -364,6 +408,8 @@ class AnswerBook:
             terms=set(normalized(row['question']).split())-{'que','de','em','uma','com','the','and','you','your','voce','para','como','nos','por','quais','experiencia','profissionalmente'}
             ranked=sorted(self.project_evidence.items(),key=lambda item:len(terms & set(normalized(item[1]['value']).split())),reverse=True)
             for ref,evidence in ranked[:4]:sources[ref]=dict(evidence,value=evidence['value'][:2200])
+        sources=proposal_fact_sources(row['question'],row['context'],sources)
+        if not sources:return {'supported':False,'reason':'missing_facts'}
         schema = {'type': 'object', 'properties': {'supported': {'type': 'boolean'},
                   'value': {'type': ['string', 'number', 'boolean', 'array', 'null'],'items':{'type':['string','number']}},
                   'refs': {'type': 'array', 'items': {'type': 'string','enum':list(sources)}}}, 'required': ['supported', 'value', 'refs'], 'additionalProperties': False}

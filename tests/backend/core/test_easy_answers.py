@@ -1,6 +1,6 @@
 import json
 import pytest
-from core.easy_answers import AnswerBook, sync_profile_facts, valid_value, damaged_text
+from core.easy_answers import AnswerBook, sync_profile_facts, valid_value, damaged_text, proposal_fact_sources
 from core.application_safety import SafetyError
 
 
@@ -191,6 +191,76 @@ async def test_valid_model_proposal_still_requires_human_approval(tmp_path,monke
     assert 'pending' in b.resolve(q,j)
     b.approve(aid,'test@example.invalid')
     assert b.resolve(q,j)['source']=='cache'
+
+
+@pytest.mark.parametrize('question',[
+    'When are you available to begin work at Encora?',
+    'Qual sua disponibilidade para início?',
+    'Have you ever been a Group Example employee?',
+    'I hereby consent to receive text messages from Example.',
+    'What is your current base salary? (in reais)',
+    'Do you currently receive any variable compensation (Annual Bonus, Commissions, Stock Options, RSUs)?',
+    'Do you have any relatives currently working at Example?',
+    'What was your undergraduate GPA (Coeficiente de Rendimento or IRA)?',
+    'If it is from an EVENT or you clicked OTHER, please specify:',
+    'If you checked any of the options above, please provide the details below.',
+])
+async def test_unrelated_facts_cannot_support_sensitive_factual_proposals(tmp_path,monkeypatch,question):
+    b=book(tmp_path)
+    source=json.loads((tmp_path/'confirmed_facts.json').read_text())
+    source['facts'] += [{'id':'employer.current','value':'Consultancy','source':'user'},
+                        {'id':'experience.start','value':'2023','source':'user'}]
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps(source))
+    b=AnswerBook(tmp_path)
+    q={'label':question,'type':'text','options':[]}
+    aid=b.resolve(q,{'url':'job','company':'Example'})['pending']
+    def forbidden(*args,**kwargs):raise AssertionError('Missing facts must not trigger inference')
+    monkeypatch.setattr('urllib.request.urlopen',forbidden)
+    assert (await b.propose(aid,{}))['reason']=='missing_facts'
+    assert b.list()[0]['state']=='pending'
+
+
+@pytest.mark.parametrize('question,options,language,expected',[
+    ('When are you available to begin work at Encora?', [{'text':'Immediately','value':'now'},{'text':'In 1 month','value':'later'}], 'en','now'),
+    ('Qual sua disponibilidade para início?', [], 'pt','Imediato'),
+])
+def test_explicit_immediate_availability_is_reused_without_model(tmp_path,question,options,language,expected):
+    book(tmp_path)
+    path=tmp_path/'confirmed_facts.json';source=json.loads(path.read_text())
+    source['facts'].append({'id':'availability.immediate','value':True,'source':'user'})
+    path.write_text(json.dumps(source))
+    b=AnswerBook(tmp_path);q={'label':question,'type':'text' if not options else 'select-one','options':options}
+    result=b.resolve(q,{'url':'job','form_language':language})
+    assert result=={'value':expected,'refs':['availability.immediate'],'source':'rule'}
+    source['facts'].pop();path.write_text(json.dumps(source))
+    assert 'pending' in AnswerBook(tmp_path).resolve(q,{'url':'job','form_language':language})
+
+
+async def test_factual_proposal_cannot_cite_unrelated_employment_fact(tmp_path,monkeypatch):
+    book(tmp_path)
+    path=tmp_path/'confirmed_facts.json';source=json.loads(path.read_text())
+    source['facts'].append({'id':'availability.notice','value':'2 weeks','source':'user'})
+    path.write_text(json.dumps(source))
+    b=AnswerBook(tmp_path)
+    aid=b.resolve({'label':'Your notice period?','type':'text','options':[]},{'url':'job'})['pending']
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self):return json.dumps({'message':{'content':json.dumps({'supported':True,'value':'Immediately','refs':['name.full']})}}).encode()
+    monkeypatch.setattr('urllib.request.urlopen',lambda *a,**k:Response())
+    assert (await b.propose(aid,{}))['reason']=='invalid_proposal'
+    assert b.list()[0]['state']=='pending'
+
+
+def test_sms_consent_and_affiliation_evidence_stay_bound_to_the_confirmed_company():
+    sources={'consent.sms.example':{'value':True,'scope':'Example'},
+             'employment.affiliation.example':{'value':False},
+             'employment.previous':{'value':False,'scope':'Other'},
+             'employer.current':{'value':'Consultancy'}}
+    assert set(proposal_fact_sources('I consent to receive text messages',{'company':'Example'},sources))=={'consent.sms.example'}
+    assert proposal_fact_sources('I consent to receive text messages',{'company':'Other'},sources)=={}
+    assert set(proposal_fact_sources('Have you ever been an Example employee?',{'company':'Example'},sources))=={'employment.affiliation.example'}
+    assert proposal_fact_sources('Have you ever been an employee?',{'company':''},sources)=={}
 
 
 def test_salary_units_can_be_confirmed_on_pending_question_without_cross_job_leak(tmp_path):

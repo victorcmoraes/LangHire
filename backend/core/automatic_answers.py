@@ -7,7 +7,7 @@ import types
 import uuid
 
 from .application_safety import now
-from .easy_answers import digest,valid_value
+from .easy_answers import digest,valid_value,proposal_fact_sources
 
 
 def code_identity(code):
@@ -37,12 +37,14 @@ async def resolve_answer(book,field,job,metrics=None):
     if (ollama.get('model') or '').split('@')[0]!='qwen3:8b':
         return dict(answer,proposal_state='qwen3_8b_not_configured')
     aid=answer['pending'];row=next(r for r in book.list() if r['id']==aid)
+    allowed=proposal_fact_sources(row['question'],row['context'],book.facts|book.project_evidence)
     if (row['state']=='proposed' and row['facts_version']==book.reference_version(row['refs'])
+            and row['refs'] and all(ref in allowed for ref in row['refs'])
             and valid_value(row['field'],row['proposal'])):
         return dict(answer,proposal_state='proposed',approval_required=True)
     fingerprint=digest({'field':row['field'],'context':row['context'],'facts':book.version,
         'repositories':digest(book.project_evidence),'model':ollama,
-        'implementation':digest([code_identity(type(book).propose.__code__),code_identity(valid_value.__code__)])})
+        'implementation':digest([code_identity(type(book).propose.__code__),code_identity(valid_value.__code__),code_identity(proposal_fact_sources.__code__)])})
     run_id=job.get('_answer_run_id') or 'process:'+str(os.getpid())
     claim=uuid.uuid4().hex;instant=time.time()
     with book.store.db() as db:
