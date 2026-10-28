@@ -36,6 +36,22 @@ def test_explicit_remote_work_type_is_supported():
     assert qualify(job('Requirements:\nJava\nWork Type:\nRemote',location='Brazil, Colombia'),FACTS)['state']=='eligible'
 
 
+def test_required_specific_schedule_is_not_inferred_from_technology_experience():
+    line='Availability to work until 3:00 PM CST.'
+    assert qualify(job('Requirements:\nJava\n'+line),FACTS)['reason']=='mandatory_schedule_not_confirmed'
+    confirmed=dict(FACTS,**{'availability.schedule':{'value':[line]}})
+    assert qualify(job('Requirements:\nJava\n'+line),confirmed)['state']=='eligible'
+
+
+def test_explicit_home_location_policy_supports_brazil_but_not_other_countries_or_hybrid():
+    text='Our team operates under a remote-first model; we can live anywhere in Brazil.\nRequirements:\nJava'
+    result=qualify(job(text,location='Brasil'),FACTS)
+    assert result['state']=='eligible' and 'can live anywhere in Brazil' in result['evidence']
+    assert qualify(job(text.replace('Brazil','Argentina'),location='Argentina'),FACTS)['state']=='pending'
+    assert qualify(job(text,location='Curitiba | On-site'),FACTS)['state']=='discarded'
+    assert qualify(job(text+'\nWork Type: Hybrid',location='Sao Paulo, Brazil'),FACTS)['state']=='discarded'
+
+
 def test_specialist_accounting_and_production_ml_are_not_implied_by_general_engineering():
     assert qualify(job('Requirements:\nPython',title='Software Engineer II with Accounting Experience'),FACTS)['state']=='pending'
     description='Requirements:\n2+ years of software engineering experience, with a strong focus on ML engineering and deploying machine learning models in production.'

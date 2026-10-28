@@ -9,6 +9,16 @@ from core.application_safety import AttemptStore
 from core.submission_monitor import SubmissionMonitor, is_submission, clean_url, same_lever_redirect, confirmation_matches_job
 
 
+def test_hosted_confirmation_template_requires_its_own_job_receipt_route():
+    from core.submission_monitor import SUCCESS
+    text="Thank you for your application! We're thrilled to know you're considering being part of our team!"
+    job='https://job-boards.greenhouse.io/fixture/jobs/123'
+    assert SUCCESS.search(text)
+    assert confirmation_matches_job(job,job+'/confirmation')
+    assert not confirmation_matches_job(job,job)
+    assert not confirmation_matches_job(job,job.replace('123','456')+'/confirmation')
+
+
 @pytest.fixture
 async def fixture_portal(tmp_path):
     async with async_playwright() as playwright:
@@ -163,6 +173,23 @@ async def test_http_200_json_rejection_cannot_be_hidden_by_success_toast(fixture
     async def no_wait(_): pass
     monkeypatch.setattr("core.submission_monitor.asyncio.sleep", no_wait)
     assert (await monitor.finalize())["state"] == "uncertain"
+
+
+@pytest.mark.parametrize('receipt,expected',[(True,'confirmed'),(False,'uncertain')])
+async def test_unavailable_json_body_is_not_a_parsed_rejection_but_still_requires_receipt(fixture_portal,monkeypatch,receipt,expected):
+    page,data,store,aid,monitor=fixture_portal
+    # Hosted forms may navigate away before CDP can retrieve the response body.
+    from playwright.async_api import Response
+    async def unavailable(self):raise RuntimeError('Response body unavailable after navigation')
+    monkeypatch.setattr(Response,'json',unavailable)
+    await click_submit(page,monitor)
+    if not receipt:await page.set_content('Processing your application')
+    async def no_wait(_):pass
+    monkeypatch.setattr('core.submission_monitor.asyncio.sleep',no_wait)
+    assert (await monitor.finalize())['state']==expected
+    assert data['received']==1 and len(store.submissions(aid))==1
+    with store.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='response_body_unavailable'",(aid,)).fetchone()[0]==1
 
 
 async def test_resume_upload_and_new_confirmation_tab(fixture_portal):

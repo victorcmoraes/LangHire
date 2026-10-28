@@ -8,7 +8,7 @@ from .easy_answers import AnswerBook,normalized
 from .external_catalog import identity
 
 TRACK=re.compile(r'back.?end|software (?:engineer|developer)|desenvolv|developer|data engineer|engenheir.*dados|analytics engineer|(?:ai|ia|ml|tooling|integration|gtm) engineer|automa[ct]|integrac',re.I)
-EXCLUDED=re.compile(r'\b(?:staff|principal|manager|diretor|director|head|architect|arquiteto|master(?!\s+data)|lead|qa|quality|tester|ios|android|mobile|abap)\b',re.I)
+EXCLUDED=re.compile(r'\b(?:staff|principal|manager|diretor|director|head|architect|arquiteto|master(?!\s+data)|lead|leader|qa|quality|tester|ios|android|mobile|abap)\b',re.I)
 
 
 def required_text(description):
@@ -23,7 +23,7 @@ def required_text(description):
 def qualify(job,facts):
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
-        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML']}
+        return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule']}
     if not TRACK.search(normalized(title)):return result('discarded','outside_tracks',[title])
     if EXCLUDED.search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
     if re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
@@ -35,6 +35,11 @@ def qualify(job,facts):
     years=facts.get('experience.years',{}).get('value')
     for line in required.splitlines():
         if re.search(r'preferred|desej[aá]vel|nice.to.have',line,re.I):continue
+        if (re.search(r'availability to work|disponibilidade para trabalhar',line,re.I)
+                and re.search(r'\d{1,2}(?::\d{2})?\s*(?:am|pm|CST|EST|PST|UTC|GMT)\b',line,re.I)):
+            accepted=facts.get('availability.schedule',{}).get('value',[])
+            if not isinstance(accepted,list) or normalized(line) not in [normalized(v) for v in accepted if isinstance(v,str)]:
+                return result('pending','mandatory_schedule_not_confirmed',[line])
         duration=re.search(r'(\d+)\s*(?:\+|[-–]\s*\d+)?\s*(?:anos|years)\b',line,re.I)
         if duration:
             if not isinstance(years,(int,float)):return result('pending','mandatory_duration_not_confirmed',[line])
@@ -52,21 +57,28 @@ def qualify(job,facts):
     explicit_mode=re.search(r'(?:work\s*type|\bmode)\s*:\s*(remote|hybrid|on.?site)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
     metadata_remote=job.get('platform',job.get('source'))=='lever' and job.get('workplaceType')=='remote'
-    remote=metadata_remote or bool(re.search(r'remot[eo]|home office',location,re.I)) or bool(explicit_mode and explicit_mode[1].lower()=='remote')
+    # A stated location policy is evidence; a generic country mention or
+    # occasional remote-work benefit is not.
+    home_policy=re.search(r'(?:can|may) (?:live|work) anywhere in (?:Brazil|Brasil)|(?:pode\w*|possibilidade de) (?:morar|trabalhar) (?:de |em )?qualquer (?:lugar|local) (?:do |no )?Brasil',description,re.I)
+    remote=metadata_remote or bool(re.search(r'remot[eo]|home office',location,re.I)) or bool(explicit_mode and explicit_mode[1].lower()=='remote') or bool(home_policy)
+    location_onsite=re.search(r'\bhybrid\b|hibrid[oa]|on.?site|presencial',normalized(location))
+    if location_onsite:remote=False
     if hybrid or (explicit_mode and explicit_mode[1].lower()!='remote'):remote=False
     if not remote:
         if not re.search(r'Olinda|Recife',location,re.I):
-            if hybrid or explicit_mode or job.get('workplaceType') in ('hybrid','on-site'):
-                return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else job['workplaceType']])
+            if hybrid or explicit_mode or location_onsite or job.get('workplaceType') in ('hybrid','on-site'):
+                return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else job['workplaceType']])
             return result('pending','working_arrangement_needs_evidence',[location])
     country=job.get('country')
-    explicit_brazil=country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I))
+    explicit_brazil=country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
     if not explicit_brazil:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)])
     salary=job.get('salaryRange') or {}
     if salary.get('currency')=='BRL' and salary.get('interval') in ('month','monthly') and salary.get('max',999999)<4000:
         return result('discarded','published_salary_below_floor',[str(salary)])
     if not description.strip():return result('pending','missing_requirements',[title])
-    return result('eligible','requirements_supported_and_brazil_location',[title,location,'country='+str(country),required[:2000]])
+    evidence=[title,location,'country='+str(country),required[:2000]]
+    if home_policy:evidence.append(home_policy[0])
+    return result('eligible','requirements_supported_and_brazil_location',evidence)
 
 
 def triage(data_dir):

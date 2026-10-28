@@ -48,7 +48,18 @@ def queue(data):
             isolated.append({'url':job['url'],'reason':'protected_or_possible_duplicate','title':job['title']});continue
         seen.add(duplicate)
         kept.append(dict(job,external_qualification=decision))
-    kept.sort(key=lambda j:(0 if re.search('back.?end|java|python',j['title'],re.I) else 1,j['title']))
+    # Cached readiness changes priority only; execution checks a fresh schema
+    # and the live form before allowing a send intention.
+    facts_version=AnswerBook(data).version
+    def ready_priority(job):
+        path=data/'external/preflight'/(job['board']+'-'+str(job['externalId'])+'.json')
+        try:
+            result=json.loads(path.read_text(encoding='utf-8'))
+            age=(datetime.now(ZoneInfo('UTC'))-datetime.fromisoformat(result['checked_at'])).total_seconds()
+            return not (result['ready_for_browser'] and result['facts_version']==facts_version
+                        and result['url']==job['url'] and 0<=age<=3600)
+        except (OSError,ValueError,KeyError,TypeError):return True
+    kept.sort(key=lambda j:(ready_priority(j),0 if re.search('back.?end|java|python',j['title'],re.I) else 1,j['title']))
     (data/'external/isolated-duplicates.json').write_text(json.dumps(isolated,ensure_ascii=False,indent=2),encoding='utf-8')
     return kept
 
@@ -60,6 +71,17 @@ def update_projection(job,result):
             update_job(url,status='applied' if result['state']=='confirmed' else 'uncertain' if result['state']=='uncertain' else 'blocked',
                        external_result=result['state'],attempt_id=result['id'],evidence_dir=result['evidence_dir'],error=result['message'],
                        applied_at=result['updated_at'] if result['state']=='confirmed' else old.get('applied_at'))
+
+
+def update_reconciled_status(data,result,report_path):
+    """Refresh a completed run's current view, preserving its original report."""
+    path=Path(data)/'external/run-state.json'
+    if not path.exists():return False
+    status=json.loads(path.read_text(encoding='utf-8'))
+    if status.get('running') or status.get('attempt_id')!=result['id']:return False
+    status.update(stage=result['state'],result=result['state'],reconciled=True,report_path=str(report_path))
+    temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(status,ensure_ascii=False),encoding='utf-8');temporary.replace(path)
+    return True
 
 
 async def run_external(data,body,status):

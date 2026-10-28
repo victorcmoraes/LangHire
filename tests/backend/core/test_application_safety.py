@@ -5,6 +5,34 @@ import pytest
 from core.application_safety import AttemptStore, SafetyError
 
 
+@pytest.mark.parametrize('mode',['valid','wrong_job','missing_screenshot','missing_mail','explicit_rejection','late_mail','no_http'])
+def test_saved_receipt_reconciliation_never_resends_or_erases_history(tmp_path,mode):
+    import json
+    from datetime import timedelta
+    store=AttemptStore(tmp_path);url='https://job-boards.greenhouse.io/fixture/jobs/123';aid=store.begin(url)
+    store.intent(aid,'one-send','https://boards.greenhouse.io/fixture/jobs/123')
+    if mode!='no_http':store.response('one-send',200)
+    store.event(aid,'portal_response',{'status':200,'semantic_rejection':mode=='explicit_rejection'})
+    store.transition(aid,'uncertain','Response body unavailable')
+    directory=tmp_path/'evidence'/aid;directory.mkdir(exist_ok=True)
+    (directory/'capture.json').write_text(json.dumps([{'url':url.replace('123','456')+'/confirmation' if mode=='wrong_job' else url+'/confirmation',
+        'text':'Thank you for applying. Your application has been received.'}]))
+    if mode!='missing_screenshot':(directory/'capture.png').write_bytes(b'\x89PNG\r\n\x1a\nfixture')
+    mail={'source':'gmail_plugin','kind':'application_received','message_id':'fixture','sender':'ats@example.invalid',
+          'recipient':'candidate@example.invalid','received_at':(datetime.now(timezone.utc)+timedelta(hours=2 if mode=='late_mail' else 0)).isoformat()}
+    if mode!='missing_mail':(directory/'mail.json').write_text(json.dumps(mail))
+    if mode=='valid':
+        assert store.reconcile_confirmed_receipt(aid,'capture.json','capture.png','mail.json')['state']=='confirmed'
+        with store.db() as db:
+            assert db.execute("SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='uncertain'",(aid,)).fetchone()[0]==1
+            assert db.execute("SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='receipt_reconciled'",(aid,)).fetchone()[0]==1
+    else:
+        with pytest.raises(SafetyError):store.reconcile_confirmed_receipt(aid,'capture.json','capture.png','mail.json')
+        assert store.get(aid)['state']=='uncertain'
+    assert len(store.submissions(aid))==1
+    with pytest.raises(SafetyError):store.begin(url)
+
+
 @pytest.mark.parametrize('status,proof,finalized',[(200,True,False),(428,False,False),(428,True,True)])
 def test_email_continuation_never_reopens_ordinary_or_unproven_attempts(tmp_path,status,proof,finalized):
     store=AttemptStore(tmp_path);aid=store.begin('https://job-boards.greenhouse.io/fixture/jobs/123')

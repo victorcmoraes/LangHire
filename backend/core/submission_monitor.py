@@ -17,7 +17,7 @@ from .application_safety import ACTIVE, AttemptStore, SafetyError, job_key
 
 SUCCESS = re.compile(
     r"application (?:has been |was )?(?:successfully )?submitted|"
-    r"we (?:have |have successfully )?received your application|thank you for applying|"
+    r"we (?:have |have successfully )?received your application|thank you for (?:applying|your application)|"
     r"candidatura (?:foi )?(?:enviada|recebida)(?: com sucesso)?", re.I)
 ERROR = re.compile(
     r"error verifying your application|unable to submit|application (?:was )?not submitted|"
@@ -381,12 +381,18 @@ class SubmissionMonitor:
                             and greenhouse_submit_job(response.url,response.request.method,response.request.post_data_buffer)):
                         self.store.event(self.attempt_id,'greenhouse_email_precondition',{
                             'request_key':key,'code':'captcha-failed','recipient_present':True})
-                except Exception:
-                    self.rejected_responses.add(key)
+                except Exception as error:
+                    # A response body can be empty or become unavailable when
+                    # the hosted form navigates. This is not a parsed rejection.
+                    # HTTP alone still cannot confirm anything: guard requires
+                    # the independent, explicit receipt for this exact job.
+                    self.store.event(self.attempt_id,'response_body_unavailable',{
+                        'request_key':key,'url':clean_url(response.url),'status':response.status,
+                        'error_type':type(error).__name__})
             self.store.response(key, response.status)
             self.store.event(self.attempt_id, "portal_response",
                              {"url": clean_url(response.url), "status": response.status,
-                              "semantic_rejection_or_invalid_json": key in self.rejected_responses})
+                              "semantic_rejection": key in self.rejected_responses})
         except Exception as error:
             self.store.event(self.attempt_id, "capture_error", {"stage": "response", "error": str(error)})
 

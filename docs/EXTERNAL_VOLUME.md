@@ -9,9 +9,11 @@ From the checkout, with the existing imported catalog, confirmed facts and PDF:
 ```powershell
 .venv\Scripts\python.exe -m cli.external collect
 .venv\Scripts\python.exe -m cli.external status
+.venv\Scripts\python.exe -m cli.external preflight --limit 50
 .venv\Scripts\python.exe -m cli.external run --platform greenhouse --execution review --limit 30
 .venv\Scripts\python.exe -m cli.external run --platform greenhouse --execution submit --limit 10
 .venv\Scripts\python.exe -m cli.external stop
+.venv\Scripts\python.exe -m cli.external export --tracker path\to\candidaturas.csv
 ```
 
 `collect` refreshes the already known employer boards through public read-only
@@ -23,7 +25,11 @@ Greenhouse preflight resolves required questions from public form schemas before
 opening Chrome or uploading a resume. Unsupported mandatory controls and unknown
 facts remain pending. Form review then checks the live controls independently.
 Current coverage includes ordinary text, React single selects and the configured
-PDF; mandatory multi-selects remain a known limitation. A selected file input
+PDF, native checkbox groups, React multiple selects, phone calling codes and
+city/state/country autocomplete. Location and demographic schema sections are
+included in preflight. Demographic questions use an explicit decline option,
+without inferring a personal attribute. Their required processing checkbox is
+accepted only when all survey responses decline disclosure. A selected file input
 may disappear after the hosted uploader accepts the attachment. Uploader setup
 must finish before choosing a file. A resume is never attached as a cover letter.
 
@@ -45,7 +51,45 @@ here)” in an employer's interview-process description is not a receipt.
 The first real Greenhouse attempt reached this email-verification precondition
 before support was added, so it remains uncertain and protected. The new
 continuation is fixture-tested, not yet validated with a real confirmation.
-No external application is confirmed at this checkpoint.
+Two external applications have since been independently confirmed on Greenhouse,
+in two companies, with accepted HTTP responses, saved own-job confirmation routes
+and received application emails. Both initially produced false negatives in the
+monitor: an unavailable response body was conflated with rejection, and one
+receipt used an unrecognized "Thank you for your application" template. The
+classifier now distinguishes unavailable bodies from explicit parsed rejection;
+it still requires the matching portal receipt. An HTTP 200 alone is insufficient.
+Three distinct hosted forms have been filled and reviewed, including Portuguese
+and English questions. The three-confirmation external milestone remains incomplete.
+
+For already-final uncertain records, `reconcile-receipt` requires retained portal
+JSON, its screenshot, a mailbox receipt and a successful submit response. It
+retains previous events and charges, creates an audit report and updates the job
+projection; it never repeats submission. Example (filenames are relative to that
+attempt's evidence directory):
+
+```powershell
+.venv\Scripts\python.exe -m cli.external reconcile-receipt --attempt-id ATTEMPT --capture CAPTURE.json --screenshot CAPTURE.png --mail-receipt receipt-email.json
+```
+
+Preflight inspects up to three public schemas concurrently without opening Chrome.
+Browser applications remain sequential. A fresh ready result prioritizes a job in
+the queue; execution always checks its current schema and live form again. The
+latest bounded scan checked nine jobs: two ready for browser preparation, six
+pending and one changed job identity. Those are preparation counts, not sends.
+All answers in this scan came from rules or approved cache, without model calls.
+An additional otherwise-fillable job is held because a required working schedule
+has not been confirmed. Technical experience does not establish availability.
+
+Equivalent questions with the same displayed option set and context share a
+pending answer even when their ATS option IDs differ. An approval is translated
+back to each form's own IDs; review checks both the accepted value and original
+approval. Country, company where relevant, language and salary units remain
+part of identity. Changed facts, changed options and conflicting approvals block
+reuse. Older pending rows are preserved; this is not a destructive history migration.
+
+CSV export appends only confirmed external receipts, preserves existing file
+bytes and manual columns, backs up before appending and is idempotent for already
+exported job identities. It does not turn an uncertain attempt into a CSV success.
 
 Verification diagnosis holds affect only their platform's sends. A pending
 candidate-email clarification blocks additional sends without blocking public

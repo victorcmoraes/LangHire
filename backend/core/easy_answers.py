@@ -23,6 +23,31 @@ def answer_key(field, context):
                    'options': field.get('options', []), 'context': context})
 
 
+def equivalent_key(field, context):
+    """Only ignore transport IDs when every displayed option is unambiguous."""
+    options = field.get('options', [])
+    labels = [normalized(o['text']) for o in options]
+    if not labels or any(not label for label in labels) or len(set(labels)) != len(labels):
+        return answer_key(field, context)
+    return digest({'question': normalized(field['label']), 'type': field['type'],
+                   'option_labels': sorted(labels), 'context': context})
+
+
+def mapped_answer(source, target, value):
+    """Translate a human-approved display choice to this form's own option ID."""
+    if not source.get('options') and not target.get('options'):
+        return value if valid_value(target, value) else None
+    source_by_value = {str(o['value']): normalized(o['text']) for o in source.get('options', [])}
+    target_by_label = {normalized(o['text']): str(o['value']) for o in target.get('options', [])}
+    if len(source_by_value) != len(source.get('options', [])) or len(target_by_label) != len(target.get('options', [])):
+        return None
+    values = value if source['type'] == 'checkbox-group' else [value]
+    mapped = [target_by_label.get(source_by_value.get(str(v))) for v in values]
+    if any(v is None for v in mapped):return None
+    result = mapped if target['type'] == 'checkbox-group' else mapped[0]
+    return result if valid_value(target, result) else None
+
+
 def salary_question(question):
     return bool(re.search(r'salary|salari|remunera|pretensao|renda|taxa hora', normalized(question)))
 
@@ -62,6 +87,11 @@ def sync_profile_facts(directory, before, after):
 
 
 def valid_value(field, value):
+    if field.get('type') == 'checkbox-group':
+        if not isinstance(value, list) or (field.get('required', True) and not value):return False
+        if any(not isinstance(v, (str, int)) or isinstance(v, bool) for v in value):return False
+        if len({str(v) for v in value}) != len(value):return False
+        return all(sum(str(v) == str(o['value']) for o in field.get('options', [])) == 1 for v in value)
     if not isinstance(value, (str, bool, int, float)) or value == '' or damaged_text(value):
         return False
     if field.get('options'):
@@ -112,8 +142,9 @@ class AnswerBook:
         q = normalized(question)
         # Country comes from qualification, never from a mention inside a description.
         context = {'country': job.get('eligibility_country', ''), 'language': job.get('form_language', 'unknown'),
-                'company': job.get('company', '') if re.search(r'family|relative|worked.*(?:here|company)|familiar|parentesco|empresa|company|sponsor', q) else '',
+                'company': job.get('company', '') if re.search(r'family|relative|worked.*(?:here|company)|employed|contracted|subsidiar|conflict|consent|privacy|acknowledg|familiar|parentesco|empresa|company|sponsor', q) else '',
                 'currency': job.get('salary_currency', ''), 'period': job.get('salary_period', '')}
+        if re.search(r'\b(?:voce|qual|quais|possui|sua|seu|nacionalidade|raca|genero|orientacao)\b',q):context['language']='pt'
         for currency,pattern in [('BRL',r'R\$|\bBRL\b|\breais\b'),('USD',r'US\$|\bUSD\b'),('EUR',r'€|\bEUR\b')]:
             if re.search(pattern,question,re.I):context['currency']=currency
         for period,pattern in [('monthly',r'\bmonthly\b|\bmensal\b|por mes'),('annual',r'\bannual\w*\b|\banual\b|por ano'),('hourly',r'\bhourly\b|por hora')]:
@@ -125,17 +156,37 @@ class AnswerBook:
 
     def direct(self, field, context):
         q = normalized(field['label'])
+        if field.get('category')=='demographic-consent':
+            if field.get('declines_only') is True and field['type']=='checkbox':
+                return {'value':True,'refs':[],'source':'rule'}
+            return None
+        if field.get('category')=='demographic':
+            decline=[o['value'] for o in field.get('options',[]) if o.get('decline_to_answer') is True
+                     and normalized(o['text']) in ('i don t wish to answer','i prefer not to answer','prefiro nao responder','nao quero responder','id rather not say')]
+            if len(decline)==1:return {'value':decline if field['type']=='checkbox-group' else decline[0],'refs':[],'source':'rule'}
+            return None
+        if q in ('do you have any disability neurodiversity','voce possui alguma deficiencia neurodiversidade'):
+            decline=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('i d rather not say','prefiro nao informar')]
+            if len(decline)==1:return {'value':decline[0],'refs':[],'source':'rule'}
         if context.get('country')=='BR':
             resident=self.facts.get('location.country')
+            brazil_resident=resident and normalized(str(resident['value'])) in ('br','brasil','brazil')
+            if field['type']=='phone-country' and brazil_resident and str(self.facts.get('phone.countryCode',{}).get('value','')).lstrip('+')=='55':
+                return {'value':'+55','refs':['phone.countryCode','location.country'],'source':'rule'}
+            if field['type']=='location' and brazil_resident and all(key in self.facts for key in ('location.city','location.state')):
+                return {'value':self.facts['location.city']['value'],'refs':['location.city','location.state','location.country'],'source':'rule'}
             if resident and normalized(str(resident['value'])) in ('br','brasil','brazil') and q in ('are you based in brazil','voce reside no brasil'):
                 choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
+                if len(choices)==1:return {'value':choices[0],'refs':['location.country'],'source':'rule'}
+            if resident and normalized(str(resident['value'])) in ('br','brasil','brazil') and q in ('are you a resident of any these countries','country of residence','pais de residencia'):
+                choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('br','brasil','brazil')]
                 if len(choices)==1:return {'value':choices[0],'refs':['location.country'],'source':'rule'}
             cpf=self.facts.get('identity.cpf')
             if cpf and re.fullmatch(r'(?:numero do )?cpf(?: somente numeros| apenas numeros)?',q):
                 if valid_value(field,cpf['value']):return {'value':cpf['value'],'refs':['identity.cpf'],'source':'rule'}
             nationality=self.facts.get('nationality')
             if nationality and normalized(str(nationality['value'])) in ('brazilian','brasileiro','brasileira'):
-                if q in ('nationality','nacionalidade'):
+                if q in ('nationality','nacionalidade','what is your nationality','qual e a sua nacionalidade'):
                     if field.get('options'):
                         choices=[o['value'] for o in field['options'] if normalized(o['text']) in ('brazilian','brasileiro','brasileira','brasil','brazil')]
                         if len(choices)==1:return {'value':choices[0],'refs':['nationality'],'source':'rule'}
@@ -143,22 +194,35 @@ class AnswerBook:
                 if re.search(r'are you a citizen or permanent resident of the country',q):
                     choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
                     if len(choices)==1:return {'value':choices[0],'refs':['nationality'],'source':'rule'}
-                if re.search(r'do you have the legal right to live and work in the location|are you authorized to work in the country you reside',q):
+                if re.search(r'do you have the legal right to live and work in the location|are you authorized to work in the country you reside|do you have authorization to live and work in your country|do you have an eligible work authorization to work in brazil|voce esta legalmente autorizado(?: a)? a trabalhar no pais onde a vaga esta localizada',q):
                     choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
                     if len(choices)==1:return {'value':choices[0],'refs':['nationality'],'source':'rule'}
+                if q in ('if yes what is the validity if you are not a foreigner put n a','se sim qual a validade se voce nao for estrangeiro a coloque n a'):
+                    return {'value':'N/A','refs':['nationality'],'source':'rule'}
         if re.fullmatch(r'if you ?re currently employed where are you currently working please enter the full company name',q) and 'employer.current' in self.facts:
             return {'value':self.facts['employer.current']['value'],'refs':['employer.current'],'source':'rule'}
+        # Explicit negative affiliation facts include the named company; a
+        # missing company in an employment list is not a negative fact.
+        for ref, fact in self.facts.items():
+            if not ref.startswith('employment.affiliation.') or fact['value'] is not False:continue
+            company=ref.removeprefix('employment.affiliation.')
+            if re.search(r'\b'+re.escape(company)+r'\b',q) and re.search(r'employed|contracted|trabalh|prestou',q):
+                choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('no','nao')]
+                if len(choices)==1:return {'value':choices[0],'refs':[ref],'source':'rule'}
         years=self.facts.get('experience.years')
         if years and q=='how many years of experience do you have working with python' and 'Python' in self.facts.get('skills',{}).get('value',[]):
             return {'value':years['value'],'refs':['experience.years','skills'],'source':'rule'}
-        if re.fullmatch(r'(?:english level|what is your english proficiency level|nivel de ingles)',q) and 'level.english' in self.facts:
+        if re.fullmatch(r'(?:english level|what is your english (?:proficiency )?level|what s your english proficiency level|nivel de ingles|qual e o seu nivel de ingles)',q) and 'level.english' in self.facts:
             level=normalized(str(self.facts['level.english']['value']))
-            aliases={'proficient':('proficient','full professional proficiency'),
+            aliases={'proficient':('proficient','full professional proficiency','fluent'),
                      'advanced':('advanced','avancado'),
                      'intermediate':('intermediate','intermediario'),
                      'basic':('basic','basico')}
             for label in aliases.get(level,(level,)):
                 choices=[o['value'] for o in field.get('options',[]) if normalized(o['text'])==label]
+                if len(choices)==1:return {'value':choices[0],'refs':['level.english'],'source':'rule'}
+            if level in ('proficient','advanced'):
+                choices=[o['value'] for o in field.get('options',[]) if re.match(r'^(?:advanced|avancado)\b',normalized(o['text']))]
                 if len(choices)==1:return {'value':choices[0],'refs':['level.english'],'source':'rule'}
         if field.get('type')=='checkbox' and re.match(r'^(siga a empresa|follow (?:the )?company)\b',q):
             # Applying does not authorize opting into unrelated company updates.
@@ -167,8 +231,8 @@ class AnswerBook:
             'name.full': ('full name', 'nome completo'), 'name.first': ('first name', 'nome'),
             'name.last': ('last name', 'sobrenome'), 'email': ('email', 'e mail', 'email address', 'e mail address', 'endereco de email'),
             'phone': ('phone', 'phone number', 'mobile phone number', 'numero de telefone', 'numero de celular', 'telefone', 'celular'),
-            'phone.countryCode': ('phone country code', 'country code', 'codigo do pais', 'codigo de pais'),
-            'location.city': ('city', 'cidade'), 'location.state': ('state', 'estado'),
+            'phone.countryCode': ('phone country code', 'country code', 'codigo do pais', 'codigo de pais', 'please select your country phone code'),
+            'location.city': ('city', 'cidade', 'what city are you located in'), 'location.state': ('state', 'estado'),
             'url.linkedin': ('linkedin', 'linkedin profile', 'linkedin url'),
             'url.github': ('github', 'github url'), 'employer.current': ('current company', 'empresa atual'),
         }
@@ -208,16 +272,30 @@ class AnswerBook:
         if override: context.update(json.loads(override[0]))
         answer = self.direct(field, context)
         if answer: return answer
-        # Option sets and units are part of identity; fuzzy matching cannot approve answers.
+        # Displayed option sets and units are identity. ATS-specific option IDs
+        # are transport details, translated only after an exact label match.
         key = answer_key(field, context)
         with self.store.db() as db:
             row = db.execute('SELECT * FROM easy_answers WHERE key=?', (key,)).fetchone()
-            if row and row['state'] == 'approved':
-                refs = json.loads(row['refs'])
-                if row['facts_version'] == self.reference_version(refs):
-                    value = json.loads(row['answer'])
-                    if valid_value(field, value): return {'value': value, 'refs': refs, 'source': 'cache', 'answer_id': row['id']}
-                db.execute("UPDATE easy_answers SET state='stale', updated_at=? WHERE id=?", (now(), row['id']))
+            equivalent=[r for r in db.execute('SELECT * FROM easy_answers ORDER BY id')
+                        if equivalent_key(json.loads(r['field']), json.loads(r['context'])) == equivalent_key(field, context)]
+            approved=[]
+            for candidate in equivalent:
+                if candidate['state'] != 'approved':continue
+                refs=json.loads(candidate['refs'])
+                if candidate['facts_version'] != self.reference_version(refs):
+                    db.execute("UPDATE easy_answers SET state='stale', updated_at=? WHERE id=?", (now(), candidate['id']))
+                    continue
+                original=json.loads(candidate['answer'])
+                value=mapped_answer(json.loads(candidate['field']), field, original)
+                if value is not None:approved.append((candidate,value,refs,original))
+            # Conflicting old approvals require another explicit answer.
+            if approved and len({json.dumps(a[1],sort_keys=True) for a in approved}) == 1:
+                candidate,value,refs,original=approved[0]
+                db.execute('INSERT OR IGNORE INTO easy_answer_jobs VALUES(?,?)',(candidate['id'],job['url']))
+                return {'value':value,'refs':refs,'source':'cache','answer_id':candidate['id'],'approval_value':original}
+            if not row and not approved:
+                row=next((r for r in equivalent if r['state'] in ('pending','proposed','stale')),None)
             if not row:
                 db.execute('INSERT INTO easy_answers(key,question,context,field,updated_at) VALUES(?,?,?,?,?)',
                            (key, field['label'], json.dumps(context), json.dumps(field), now()))

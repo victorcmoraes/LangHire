@@ -63,6 +63,51 @@ def test_direct_facts_bypass_model_but_never_infer_years(tmp_path):
     assert 'pending' in b.resolve(field(),j)
 
 
+def test_ats_option_ids_share_one_pending_and_remap_one_approval(tmp_path):
+    b=book(tmp_path);job={'url':'job1','eligibility_country':'BR','form_language':'en','company':'Example'}
+    first={'label':'Have you previously worked at this company?','type':'select-one',
+           'options':[{'text':'Yes','value':'101'},{'text':'No','value':'102'}]}
+    second=dict(first,options=[{'text':'No','value':'9002'},{'text':'Yes','value':'9001'}])
+    aid=b.resolve(first,job)['pending']
+    assert b.resolve(second,dict(job,url='job2'))['pending']==aid
+    b.approve(aid,'102')
+    answer=b.resolve(second,dict(job,url='job2'))
+    assert answer['value']=='9002' and answer['approval_value']=='102' and answer['answer_id']==aid
+    assert len(b.list()[0]['jobs'])==2
+    assert 'pending' in b.resolve(second,dict(job,url='other',company='Different'))
+    assert 'pending' in b.resolve(second,dict(job,url='us',eligibility_country='US'))
+    changed=dict(second,options=second['options']+[{'text':'Contractor','value':'9003'}])
+    assert 'pending' in b.resolve(changed,job)
+    source=json.loads((tmp_path/'confirmed_facts.json').read_text());source['facts'][0]['value']='Changed'
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps(source))
+    assert 'pending' in AnswerBook(tmp_path).resolve(second,job)
+
+
+def test_checkbox_group_validates_and_reuses_only_approved_choices(tmp_path):
+    b=book(tmp_path);job={'url':'one','eligibility_country':'BR'}
+    q={'label':'How did you hear about us?','type':'checkbox-group','required':True,
+       'options':[{'text':'Company website','value':'1'},{'text':'Referral','value':'2'}]}
+    aid=b.resolve(q,job)['pending']
+    for invalid in [True,'1',[],['1','1'],['missing']]:
+        with pytest.raises(SafetyError):b.approve(aid,invalid)
+    b.approve(aid,['1'])
+    other=dict(q,options=[{'text':'Referral','value':'new2'},{'text':'Company website','value':'new1'}])
+    assert b.resolve(other,dict(job,url='two'))['value']==['new1']
+    assert b.resolve(other,dict(job,url='two'))['approval_value']==['1']
+
+
+def test_negative_affiliation_fact_is_not_inferred_from_an_incomplete_history(tmp_path):
+    b=book(tmp_path);job={'url':'one','company':'Exadel'}
+    q={'label':"Have you previously been employed or contracted by Exadel or any of its subsidiaries?",'type':'select-one',
+       'options':[{'text':'No','value':'n'},{'text':'Yes','value':'y'}]}
+    assert 'pending' in b.resolve(q,job)
+    source=json.loads((tmp_path/'confirmed_facts.json').read_text())
+    source['facts'].append({'id':'employment.affiliation.exadel','value':False,'source':'user'})
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps(source));b=AnswerBook(tmp_path)
+    assert b.resolve(q,job)['value']=='n'
+    assert 'pending' in b.resolve(dict(q,label=q['label'].replace('Exadel','Different')),job)
+
+
 def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_english(tmp_path):
     source={'facts':[{'id':k,'value':v,'source':'user'} for k,v in {
         'identity.cpf':'12345678909','nationality':'Brazilian','level.english':'Proficient','location.country':'Brazil'}.items()]}
@@ -75,6 +120,14 @@ def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_engl
     assert 'pending' in b.resolve(q,dict(br,url='us-job',eligibility_country='US'))
     language={'label':'English Level','type':'select-one','options':[{'text':'Full professional proficiency','value':'pro'},{'text':'Native or bilingual proficiency','value':'native'}]}
     assert b.resolve(language,br)['value']=='pro'
+    portuguese={'label':'Você está legalmente autorizado(a) a trabalhar no país onde a vaga está localizada?',
+                'type':'select-one','options':[{'text':'Sim','value':'s'},{'text':'Não','value':'n'}]}
+    assert b.resolve(portuguese,br)['value']=='s'
+    assert 'pending' in b.resolve(portuguese,dict(br,url='foreign',eligibility_country='US'))
+    demographic={'label':'Qual é a sua raça/etnia?','type':'select-one','category':'demographic',
+                 'options':[{'text':'Não quero responder','value':'decline','decline_to_answer':True}]}
+    assert b.resolve(demographic,br)['value']=='decline'
+    assert b.context(portuguese['label'],dict(br,form_language='en'))['language']=='pt'
 
 
 def test_profile_edits_replace_affected_facts_without_importing_untouched_defaults(tmp_path):

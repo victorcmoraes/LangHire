@@ -7,7 +7,7 @@ import re
 import urllib.request
 from urllib.parse import urlsplit
 
-from .application_safety import SafetyError
+from .application_safety import SafetyError,now
 from .easy_answers import AnswerBook,normalized,digest,damaged_text
 from .submission_monitor import ERROR,greenhouse_job_id,clean_url
 
@@ -23,22 +23,47 @@ async def fetch_schema(job):
     return schema
 
 
+def schema_fields(schema):
+    """Include auxiliary hosted sections, not just ordinary custom questions."""
+    fields=[]
+    kinds={'input_text':'text','input_file':'file','textarea':'textarea',
+           'multi_value_single_select':'select-one','multi_value_multi_select':'checkbox-group'}
+    for question in schema.get('questions',[]):
+        alternatives=question.get('fields',[])
+        chosen=[f for f in alternatives if f['type']=='input_file'] or alternatives
+        for raw in chosen:
+            if raw['name']=='phone' and question.get('required'):
+                fields.append({'id':'country','name':'country','label':'Phone country code','type':'phone-country',
+                               'required':True,'options':[]})
+            fields.append({'id':raw['name'],'name':raw['name'],'label':question['label'],
+                'type':kinds.get(raw['type'],'unsupported'),'control':raw['type'],'required':bool(question.get('required')),
+                'separate_country_code':raw['name']=='phone' and bool(question.get('required')),
+                'options':[{'text':o['label'],'value':str(o['value'])} for o in raw.get('values',[])]})
+    locations=[q for q in schema.get('location_questions',[]) if any(f['name']=='location' for f in q.get('fields',[]))]
+    if locations:
+        fields.append({'id':'candidate-location','name':'location','label':'Location (City)','type':'location',
+                       'required':bool(locations[0].get('required')),'options':[]})
+    for question in (schema.get('demographic_questions') or {}).get('questions',[]):
+        fields.append({'id':str(question['id']),'name':str(question['id']),'label':question['label'],
+            'type':kinds.get(question['type'],'unsupported'),'control':question['type'],
+            'required':bool(question.get('required')),'category':'demographic',
+            'options':[{'text':o['label'],'value':str(o['id']),'decline_to_answer':o.get('decline_to_answer',False)}
+                       for o in question.get('answer_options',[])]})
+    return fields
+
+
 async def preflight_greenhouse(data,job):
     """Resolve mandatory facts before opening a browser or uploading a resume."""
     schema=await fetch_schema(job);book=AnswerBook(data);pending=[];metrics={'rule':0,'cache':0,'pending':0,'model':0}
-    for question in schema.get('questions',[]):
-        if not question.get('required'):continue
-        fields=question.get('fields',[])
-        if any(f['type']=='input_file' and f['name']=='resume' for f in fields):continue
-        for raw in fields:
-            kind={'input_text':'text','textarea':'textarea','multi_value_single_select':'select-one'}.get(raw['type'])
-            if kind is None:
-                pending.append({'question':question['label'],'reason':'unsupported_required_control','control':raw['type']});metrics['pending']+=1;continue
-            field={'id':raw['name'],'name':raw['name'],'label':question['label'],'type':kind,'required':True,
-                   'options':[{'text':o['label'],'value':str(o['value'])} for o in raw.get('values',[])]}
-            answer=book.resolve(field,job);metrics[answer['source']]+=1
-            if 'pending' in answer:pending.append({'question':question['label'],'answer_id':answer['pending'],'reason':'unconfirmed_answer'})
-    result={'url':job['url'],'ready_for_browser':not pending,'pending':pending,'answer_metrics':metrics,'facts_version':book.version}
+    job=dict(job,form_language=schema.get('language') or job.get('form_language','unknown'))
+    for field in schema_fields(schema):
+        if not field['required']:continue
+        if field['type']=='file' and field['id']=='resume':continue
+        if field['type'] in ('file','unsupported'):
+            pending.append({'question':field['label'],'reason':'unsupported_required_control','control':field.get('control')});metrics['pending']+=1;continue
+        answer=book.resolve(field,job);metrics[answer['source']]+=1
+        if 'pending' in answer:pending.append({'question':field['label'],'answer_id':answer['pending'],'reason':'unconfirmed_answer'})
+    result={'url':job['url'],'checked_at':now(),'ready_for_browser':not pending,'pending':pending,'answer_metrics':metrics,'facts_version':book.version}
     directory=Path(data)/'external/preflight';directory.mkdir(parents=True,exist_ok=True)
     board,identifier=greenhouse_job_id(job['url'])
     path=directory/(board+'-'+identifier+'.json');path.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
@@ -62,35 +87,35 @@ class GreenhouseAdapter:
 
     async def load_schema(self):
         self.schema=await fetch_schema(self.job)
+        self.job['form_language']=self.schema.get('language') or self.job.get('form_language','unknown')
         (self.directory/'greenhouse-schema.json').write_text(json.dumps(self.schema,ensure_ascii=False,indent=2),encoding='utf-8')
 
     async def inspect(self):
         fields=[];mapped=set()
-        for question in self.schema.get('questions',[]):
-            alternatives=question.get('fields',[])
-            # A file upload and pasted resume are alternative representations.
-            chosen=[f for f in alternatives if f['type']=='input_file'] or alternatives
-            for raw in chosen:
-                name=raw['name'];target=self.target(name)
-                options=[{'text':o['label'],'value':str(o['value'])} for o in raw.get('values',[])]
-                kind={'input_text':'text','input_file':'file','textarea':'textarea',
-                      'multi_value_single_select':'select-one','multi_value_multi_select':'checkbox-group'}.get(raw['type'],'unsupported')
-                field={'id':name,'name':name,'label':question['label'],'type':kind,'options':options,
-                       'required':bool(question.get('required')),'value':'','present':False}
-                if kind=='checkbox-group':
-                    controls=self.page.locator('input[type=checkbox][name='+json.dumps(name)+']')
-                    field['present']=bool(await controls.count());field['value']=await controls.evaluate_all('es=>es.filter(e=>e.checked).map(e=>e.value)')
-                    mapped.add(name);fields.append(field);continue
-                if await target.count()==1:
-                    field['present']=True;mapped.add(name)
-                    field['render']=await target.get_attribute('role') or await target.evaluate('e=>e.tagName.toLowerCase()')
-                    if kind=='file':field['value']=await target.evaluate('e=>[...e.files].map(f=>f.name)')
-                    elif field['render']=='combobox':
-                        label=await target.evaluate("e=>e.closest('.select__container')?.querySelector('.select__single-value')?.innerText||''")
+        for original in schema_fields(self.schema):
+            field=dict(original,value='',present=False);name=field['id'];kind=field['type'];options=field['options'];target=self.target(name)
+            if kind=='checkbox-group' and (await target.count()!=1 or await target.get_attribute('role')!='combobox'):
+                controls=self.page.locator('input[type=checkbox][name='+json.dumps(name)+']')
+                field['present']=bool(await controls.count());field['value']=await controls.evaluate_all('es=>es.filter(e=>e.checked).map(e=>e.value)')
+                if field['present']:mapped.add(name)
+                fields.append(field);continue
+            if await target.count()==1:
+                field['present']=True;mapped.add(name)
+                field['render']=await target.get_attribute('role') or await target.evaluate('e=>e.tagName.toLowerCase()')
+                if kind=='file':field['value']=await target.evaluate('e=>[...e.files].map(f=>f.name)')
+                elif field['render']=='combobox':
+                    label=await target.evaluate("e=>e.closest('.select__container')?.querySelector('.select__single-value')?.innerText||''")
+                    if kind=='checkbox-group':
+                        labels=await target.evaluate("e=>[...e.closest('.select__container').querySelectorAll('.select__multi-value__label')].map(n=>n.innerText)")
+                        field['value']=[o['value'] for label in labels for o in options if normalized(o['text'])==normalized(label)]
+                        if len(field['value'])!=len(labels):field['value']=[]
+                    elif kind=='phone-country':field['value']='+55' if re.search(r'\+55\b',label) else label
+                    elif kind=='location':field['value']=label
+                    else:
                         match=[o['value'] for o in options if normalized(o['text'])==normalized(label)]
                         field['value']=match[0] if len(match)==1 else ''
-                    else:field['value']=await target.input_value()
-                fields.append(field)
+                else:field['value']=await target.input_value()
+            fields.append(field)
         # Helpers within mapped React selects are not separate questions. Genuine
         # newly visible required controls must nevertheless block the review.
         unknown=await self.page.locator('#application-form').evaluate(r'''(form,mapped)=>[...form.querySelectorAll('input,select,textarea')].filter(e=>{
@@ -101,22 +126,69 @@ class GreenhouseAdapter:
             const container=e.closest('.select__container');
             if(container&&[...container.querySelectorAll('[id]')].some(n=>mapped.includes(n.id)))return false;
             return !!e.getClientRects().length;
-        }).map(e=>({id:e.id,label:e.getAttribute('aria-label')||[...(e.labels||[])].map(l=>l.innerText).join(' ')||e.id||'Unmapped required control'}))''',list(mapped))
-        fields.extend({'id':e['id'],'label':e['label'],'type':'unsupported','required':True,'present':True,'value':'','options':[]} for e in unknown)
+        }).map(e=>({id:e.id,name:e.name,type:e.type,checked:e.checked,label:e.getAttribute('aria-label')||[...(e.labels||[])].map(l=>l.innerText).join(' ')||e.id||'Unmapped required control'}))''',list(mapped))
+        demographics=[f for f in fields if f.get('category')=='demographic']
+        declines_only=bool(demographics) and all(
+            (not f['required'] and not f['value']) or (f['present'] and bool(f['value']) and all(
+                any(str(v)==o['value'] and o.get('decline_to_answer') is True for o in f['options'])
+                for v in (f['value'] if isinstance(f['value'],list) else [f['value']]))) for f in demographics)
+        has_consent=any(c.get('demographic_data_consent_applies') is True for c in self.schema.get('data_compliance',[]))
+        for e in unknown:
+            field={'id':e['id'],'name':e['name'],'label':e['label'],'type':'unsupported','required':True,'present':True,'value':'','options':[]}
+            if (has_consent and e['type']=='checkbox' and e['id']
+                    and re.search(r'consent.{0,180}process.{0,80}demographic data|consinto.{0,180}process.{0,80}dados demograficos',normalized(e['label']),re.I)):
+                field.update(type='checkbox',category='demographic-consent',declines_only=declines_only,value=e['checked'])
+            fields.append(field)
         return fields
 
     async def set(self,field,answer):
         target=self.target(field['id']);value=answer['value']
-        if field['render']=='combobox':
+        if field['type']=='checkbox':await target.set_checked(value)
+        elif field['type']=='phone-country':
+            if value!='+55':raise SafetyError('Unsupported phone-country combination')
+            await target.click();await target.fill('55')
+            await self.page.get_by_role('option',name=re.compile(r'^(Brazil|Brasil)\s+\+55$')).click(timeout=10000)
+        elif field['type']=='location':
+            city=self.book.facts['location.city']['value'];state=self.book.facts['location.state']['value']
+            await target.click();await target.fill(str(city))
+            await self.page.get_by_role('option').first.wait_for(timeout=15000)
+            matches=[label for label in await self.page.get_by_role('option').all_text_contents()
+                     if re.fullmatch(re.escape(normalized(city))+r' (?:state of )?'+re.escape(normalized(state))+r' (?:brazil|brasil)',normalized(label))]
+            if len(matches)!=1:raise SafetyError('Location suggestions are missing or ambiguous')
+            value=matches[0];await self.page.get_by_role('option',name=value,exact=True).click()
+        elif field['type']=='checkbox-group' and field.get('render')=='combobox':
+            container=target.locator('xpath=ancestor::*[contains(concat(" ",normalize-space(@class)," ")," select__container ")][1]')
+            if field['value']:
+                clear=container.get_by_role('button',name='Clear selections',exact=True)
+                if await clear.count()!=1:raise SafetyError('Cannot safely replace selected survey answers')
+                await clear.click()
+            for choice in value:
+                label=next(o['text'] for o in field['options'] if o['value']==str(choice))
+                await target.click();await target.fill(label)
+                await self.page.get_by_role('option',name=label,exact=True).click(timeout=10000)
+        elif field['type']=='checkbox-group':
+            controls=self.page.locator('input[type=checkbox][name='+json.dumps(field['name'])+']')
+            actual_options=await controls.evaluate_all('es=>es.map(e=>e.value)')
+            if set(actual_options)!=set(o['value'] for o in field['options']):
+                raise SafetyError('Greenhouse checkbox options changed: '+field['label'])
+            for control in await controls.all():
+                await control.set_checked((await control.input_value()) in value)
+        elif field.get('render')=='combobox':
             option=next(o['text'] for o in field['options'] if o['value']==str(value))
             await target.click();await target.fill(option)
             await self.page.get_by_role('option',name=option,exact=True).click(timeout=10000)
         elif field['type']=='select-one':await target.select_option(str(value))
         else:await target.fill(str(value))
         current=next(f for f in await self.inspect() if f['id']==field['id'])
-        if str(current['value'])!=str(value):raise SafetyError('Greenhouse did not accept answer: '+field['label'])
-        self.expected.append((field['id'],str(value)))
-        self.used.append({'question':field['label'],'value':value,'refs':answer['refs'],'source':answer['source'],'answer_id':answer.get('answer_id')})
+        if field['id']=='phone':
+            digits=lambda s:re.sub(r'\D','',str(s))
+            if digits(current['value'])!=digits(value):raise SafetyError('Greenhouse did not accept phone number')
+            value=current['value']
+        accepted=sorted(current['value'])==sorted(value) if field['type']=='checkbox-group' else str(current['value'])==str(value)
+        if not accepted:raise SafetyError('Greenhouse did not accept answer: '+field['label'])
+        self.expected.append((field['id'],value))
+        self.used.append({'question':field['label'],'value':value,'refs':answer['refs'],'source':answer['source'],
+                          'answer_id':answer.get('answer_id'),'approval_value':answer.get('approval_value',value)})
 
     async def upload(self,field):
         if field['id']!='resume':
@@ -138,6 +210,7 @@ class GreenhouseAdapter:
     async def fill(self):
         self.stage('fill_external');missing=[]
         for field in await self.inspect():
+            if field.get('category')=='demographic-consent':continue  # Resolve after survey choices are accepted.
             if not field['present']:
                 if field['required']:missing.append('Missing required control: '+field['label'])
                 continue
@@ -145,7 +218,7 @@ class GreenhouseAdapter:
             # The optional phone's country picker is a separate control; do not
             # leave a phone entered without its own verified country selection.
             if field['id']=='phone' and not field['required']:continue
-            if field['type'] not in ('text','textarea','select-one'):
+            if field['type'] not in ('text','textarea','select-one','checkbox-group','phone-country','location'):
                 if field['required']:missing.append('Unsupported control: '+field['label'])
                 continue
             answer=self.book.resolve(field,self.job) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))
@@ -153,7 +226,14 @@ class GreenhouseAdapter:
             self.metrics[answer['source']]+=1
             if 'pending' in answer:missing.append(str(answer['pending']));continue
             await self.set(field,answer)
-        if missing:raise SafetyError('Unresolved Greenhouse questions: '+', '.join(missing))
+        for field in await self.inspect():
+            if field.get('category')!='demographic-consent':continue
+            answer=self.book.resolve(field,self.job);self.metrics[answer['source']]+=1
+            if 'pending' in answer:missing.append(str(answer['pending']))
+            else:await self.set(field,answer)
+        if missing:
+            (self.directory/'unresolved-controls.json').write_text(json.dumps(await self.inspect(),ensure_ascii=False,indent=2),encoding='utf-8')
+            raise SafetyError('Unresolved Greenhouse questions: '+', '.join(missing))
         if not self.resume_verified:raise SafetyError('No configured PDF attachment verified')
 
     async def review(self):
@@ -162,7 +242,9 @@ class GreenhouseAdapter:
         if hashlib.sha256(self.resume.read_bytes()).hexdigest()!=self.resume_hash:problems.append('Configured PDF changed')
         if greenhouse_job_id(self.page.url)!=greenhouse_job_id(self.job['url']):problems.append('Wrong job page')
         for name,value in self.expected:
-            if str(by.get(name,{}).get('value'))!=value:problems.append('Accepted answer changed: '+name)
+            actual=by.get(name,{}).get('value')
+            equal=sorted(actual)==sorted(value) if isinstance(actual,list) and isinstance(value,list) else str(actual)==str(value)
+            if not equal:problems.append('Accepted answer changed: '+name)
         for field in fields:
             if field['required'] and (not field['present'] or field['value'] in ('',[],False)):
                 if field['id']!='resume' or not self.resume_verified:problems.append(field['label'])
@@ -170,7 +252,7 @@ class GreenhouseAdapter:
         for used in self.used:
             if used.get('answer_id'):
                 row=approved.get(used['answer_id'],{})
-                if row.get('state')!='approved' or row.get('answer')!=used['value']:problems.append('Approved answer changed')
+                if row.get('state')!='approved' or row.get('answer')!=used.get('approval_value',used['value']):problems.append('Approved answer changed')
         for error in await self.page.locator('[aria-invalid=true],[role=alert],.error-message,.application--error').all():
             if await error.is_visible() and ((await error.inner_text()).strip() or await error.get_attribute('aria-invalid')=='true'):problems.append('Visible portal validation error')
         text=await self.page.locator('body').inner_text()

@@ -128,6 +128,52 @@ class AttemptStore:
                 raise SafetyError("This attempt has no live human hold")
             db.execute("UPDATE attempts SET acknowledged=1,updated_at=? WHERE id=?", (now(), attempt_id))
 
+    def reconcile_confirmed_receipt(self, attempt_id, capture_name, screenshot_name, mail_name):
+        """Reconcile a false negative from retained portal AND mailbox evidence.
+
+        This never authorizes another click or removes the original uncertainty,
+        send intention, response, or daily charge from the event history.
+        """
+        from .submission_monitor import SUCCESS, ERROR, confirmation_matches_job
+        import hashlib
+        attempt=self.get(attempt_id);directory=Path(attempt['evidence_dir']).resolve()
+        files=[]
+        for name in (capture_name,screenshot_name,mail_name):
+            path=(directory/name).resolve()
+            if not path.is_relative_to(directory) or not path.is_file():raise SafetyError('Receipt evidence missing or outside attempt')
+            files.append(path)
+        captures=json.loads(files[0].read_text(encoding='utf-8'))
+        if not isinstance(captures,list) or not any(
+                confirmation_matches_job(attempt['job_url'],view.get('url','')) and SUCCESS.search(view.get('text',''))
+                and not ERROR.search(view.get('text','')) for view in captures):
+            raise SafetyError('No explicit same-job portal receipt')
+        if files[1].read_bytes()[:8]!=b'\x89PNG\r\n\x1a\n':raise SafetyError('Receipt screenshot missing')
+        mail=json.loads(files[2].read_text(encoding='utf-8'))
+        if (mail.get('source')!='gmail_plugin' or mail.get('kind')!='application_received'
+                or not mail.get('message_id') or not mail.get('sender') or not mail.get('recipient')):
+            raise SafetyError('Mailbox receipt evidence missing')
+        try:received=datetime.fromisoformat(mail['received_at'])
+        except (KeyError,ValueError):raise SafetyError('Mailbox receipt date missing')
+        with self.db() as db:
+            row=db.execute('SELECT state FROM attempts WHERE id=?',(attempt_id,)).fetchone()
+            sends=db.execute('SELECT * FROM submissions WHERE attempt_id=?',(attempt_id,)).fetchall()
+            responses=[json.loads(r[0]) for r in db.execute("SELECT payload FROM events WHERE attempt_id=? AND kind='portal_response'",(attempt_id,))]
+            if (not row or row['state']!='uncertain' or len(sends)!=1
+                    or not sends[0]['http_status'] or not 200<=sends[0]['http_status']<300
+                    or any(r.get('semantic_rejection') is True for r in responses)):
+                raise SafetyError('Submission is not eligible for receipt reconciliation')
+            delta=(received-datetime.fromisoformat(sends[0]['at'])).total_seconds()
+            if not -60<=delta<=1800:raise SafetyError('Mailbox receipt does not match the submission window')
+            message='Reconciled from saved same-job portal receipt, accepted HTTP response and mailbox receipt; no resend'
+            proof={'evidence':[{'file':p.name,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in files],
+                   'mail_message_id':mail['message_id'],'previous_state':'uncertain','resubmitted':False}
+            db.execute("UPDATE attempts SET state='confirmed',message=?,updated_at=?,acknowledged=0 WHERE id=?",(message,now(),attempt_id))
+            db.execute('INSERT INTO events(attempt_id,at,kind,payload) VALUES(?,?,?,?)',
+                       (attempt_id,now(),'receipt_reconciled',json.dumps(proof)))
+            db.execute('INSERT INTO events(attempt_id,at,kind,payload) VALUES(?,?,?,?)',
+                       (attempt_id,now(),'confirmed',json.dumps({'message':message})))
+        return self.get(attempt_id)
+
     def reconcile_blocked_probe(self, attempt_id):
         """Operator-only recovery for a diagnosed final call proven not forwarded.
 

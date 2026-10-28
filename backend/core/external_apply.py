@@ -113,7 +113,8 @@ class LeverAdapter:
         if (field['type']=='radio' and not actual) or (field['type']!='radio' and str(actual)!=str(value)):
             raise SafetyError('Portal did not accept answer: '+field['label'])
         self.expected.append((field,value))
-        self.used.append({'question':field['label'],'value':value,'refs':answer['refs'],'source':answer['source'],'answer_id':answer.get('answer_id')})
+        self.used.append({'question':field['label'],'value':value,'refs':answer['refs'],'source':answer['source'],
+                          'answer_id':answer.get('answer_id'),'approval_value':answer.get('approval_value',value)})
 
     async def upload(self,field):
         purpose=normalized(' '.join(str(field.get(k,'')) for k in ('id','name','label')))
@@ -186,7 +187,7 @@ class LeverAdapter:
         for answer in self.used:
             if answer.get('answer_id'):
                 current=approved.get(answer['answer_id'],{})
-                if current.get('state')!='approved' or current.get('answer')!=answer['value']:problems.append('Approved answer changed')
+                if current.get('state')!='approved' or current.get('answer')!=answer.get('approval_value',answer['value']):problems.append('Approved answer changed')
         for field in await self.inspect():
             if field['required'] and field['type']!='file' and field['value'] in ('',False,[]):problems.append(field['label'])
         text=await self.page.locator('body').inner_text()
