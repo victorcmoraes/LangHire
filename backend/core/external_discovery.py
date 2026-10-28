@@ -39,8 +39,9 @@ def load_boards(data,extra=()):
     data=Path(data);rows=[]
     path=data/'external/board-registry.json'
     if path.exists():rows.extend(json.loads(path.read_text(encoding='utf-8'))['boards'])
-    path=data/'external/catalog.json'
-    if path.exists():rows.extend(json.loads(path.read_text(encoding='utf-8')).get('boards',[]))
+    else:
+        path=data/'external/catalog.json'
+        if path.exists():rows.extend(json.loads(path.read_text(encoding='utf-8')).get('boards',[]))
     rows.extend(extra)
     unique={}
     for row in rows:

@@ -1,7 +1,7 @@
 import json
 import pytest
 from core.application_safety import AttemptStore,SafetyError
-from core.external_discovery import discover,board_spec
+from core.external_discovery import discover,board_spec,load_boards
 
 
 def job(board,identifier):
@@ -91,3 +91,10 @@ def test_discovery_uses_same_configured_tracks_as_triage(tmp_path,monkeypatch):
     report=discover(tmp_path)
     assert report['new_jobs']==1 and report['new_qualification']=={'eligible':1}
     assert report['triage']=={'eligible':1}
+
+
+def test_registry_is_authoritative_even_when_catalog_remembers_removed_boards(tmp_path):
+    seed(tmp_path,[])
+    (tmp_path/'external/board-registry.json').write_text(json.dumps({'version':1,'boards':[]}))
+    assert load_boards(tmp_path)==[]
+    assert load_boards(tmp_path,['lever:explicit'])==[{'platform':'lever','board':'explicit'}]

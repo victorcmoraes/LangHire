@@ -30,6 +30,9 @@ def main():
     run.add_argument('--job-url')
     discover=sub.add_parser('discover');discover.add_argument('--board',action='append',default=[]);discover.add_argument('--max-new',type=int,default=5000)
     discover.add_argument('--aggregator-pages',type=int,default=5)
+    boards=sub.add_parser('boards');board_commands=boards.add_subparsers(dest='boards_command',required=True)
+    suggest=board_commands.add_parser('suggest');suggest.add_argument('--seeds',type=Path);suggest.add_argument('--limit',type=int,default=25)
+    add=board_commands.add_parser('add');add.add_argument('--board',action='append',required=True)
     batch=sub.add_parser('batch');batch.add_argument('--target',type=int,default=100)
     batch.add_argument('--execution',choices=('review','submit'));batch.add_argument('--platform',choices=('lever','greenhouse'))
     batch.add_argument('--collect',action='store_true');batch.add_argument('--board',action='append',default=[])
@@ -48,6 +51,10 @@ def main():
     reconcile.add_argument('--capture',required=True);reconcile.add_argument('--screenshot',required=True)
     reconcile.add_argument('--mail-receipt',required=True)
     args=parser.parse_args();data=get_data_dir();store=AttemptStore(data)
+    if args.command=='boards':
+        from backend.core.external_boards import suggest_boards,add_boards
+        report=suggest_boards(data,args.seeds,args.limit) if args.boards_command=='suggest' else add_boards(data,args.board)
+        print(json.dumps(report,ensure_ascii=False,indent=2));return
     if args.command=='approve-answer':
         from backend.core.easy_answers import AnswerBook
         if bool(args.currency)!=bool(args.period):parser.error('Currency and period must be supplied together')
