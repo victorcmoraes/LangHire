@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import json
 import re
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlencode
 
@@ -155,6 +156,7 @@ class EasyExecutor:
         self.store = EasyStore(data)
         self.directory = Path(self.store.attempts.get(attempt)['evidence_dir'])
         self.status = status if status is not None else {}
+        self.job=dict(self.job,_answer_run_id=self.status.setdefault('answer_run_id',uuid.uuid4().hex))
         self.used = []
         self.resume = None
         self.resume_hash = ''
@@ -298,7 +300,8 @@ class EasyExecutor:
             if (not field['required'] and field['value'] in ('',False,[])
                     and self.answers.direct(field,self.answers.context(field['label'],self.job)) is None):
                 continue
-            answer = self.answers.resolve(field, self.job)
+            from .automatic_answers import resolve_answer
+            answer = await resolve_answer(self.answers,field,self.job,self.counters)
             self.counters[answer['source']] += 1
             if 'pending' in answer:
                 if field['required'] or field['value'] not in ('', False, []): pending.append(str(answer['pending']))

@@ -162,7 +162,9 @@ class LeverAdapter:
             if field['type']=='location':
                 value=self.book.facts.get('location.city',{}).get('value')
                 answer={'value':value,'refs':['location.city','location.state','location.country'],'source':'rule'} if value else {'pending':'location','source':'pending'}
-            else:answer=answer or self.book.resolve(field,self.job)
+            else:
+                from .automatic_answers import resolve_answer
+                answer=answer or await resolve_answer(self.book,field,self.job,self.metrics)
             self.metrics[answer['source']]+=1
             if 'pending' in answer:missing.append(str(answer['pending']));continue
             await self.set(field,answer)

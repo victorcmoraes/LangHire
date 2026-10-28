@@ -164,6 +164,21 @@ async def test_model_with_missing_support_cannot_become_answer(tmp_path,monkeypa
     assert b.list()[0]['state']=='pending'
 
 
+async def test_pending_model_result_cannot_overwrite_a_new_human_approval(tmp_path,monkeypatch):
+    b=book(tmp_path);q={'label':'Your display name please','type':'text','options':[]}
+    aid=b.resolve(q,{'url':'one'})['pending']
+    class Response:
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def read(self):
+            b.approve(aid,'Human choice')
+            return json.dumps({'message':{'content':json.dumps({'supported':True,'value':'Model choice','refs':['name.full']})}}).encode()
+    monkeypatch.setattr('urllib.request.urlopen',lambda *a,**k:Response())
+    result=await b.propose(aid,{'ollama':{'model':'qwen3:8b'}})
+    assert result['reason']=='question_changed_during_proposal'
+    assert b.resolve(q,{'url':'one'})['value']=='Human choice'
+
+
 async def test_valid_model_proposal_still_requires_human_approval(tmp_path,monkeypatch):
     b=book(tmp_path);q=dict(label='Contact email please',type='text',options=[]);j={'url':'job'}
     aid=b.resolve(q,j)['pending']

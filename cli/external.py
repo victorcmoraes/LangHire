@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import uuid
 from types import SimpleNamespace
 
 ROOT=Path(__file__).resolve().parents[1];sys.path[:0]=[str(ROOT),str(ROOT/'backend')]
@@ -37,11 +38,12 @@ def main():
         if args.limit<1:parser.error('--limit must be positive')
         (data/'reports').mkdir(parents=True,exist_ok=True)
         async def inspect_queue():
+            run_id=uuid.uuid4().hex
             selected=[j for j in queue(data) if j['platform']=='greenhouse'][:args.limit]
             results=[];errors=[];semaphore=asyncio.Semaphore(3)
             async def inspect(job):
                 async with semaphore:
-                    try:results.append(await preflight_greenhouse(data,dict(job,eligibility_country='BR',form_language='en')))
+                    try:results.append(await preflight_greenhouse(data,dict(job,eligibility_country='BR',form_language='en',_answer_run_id=run_id)))
                     except Exception as error:errors.append({'url':job['url'],'reason':str(error)[:300]})
             await asyncio.gather(*(inspect(job) for job in selected))
             report={'checked_at':now(),'considered':len(selected),'ready_for_browser':sum(r['ready_for_browser'] for r in results),
@@ -53,7 +55,7 @@ def main():
             return {k:v for k,v in report.items() if k!='jobs'}|{'report_path':str(path)}
         triage(data);print(json.dumps(asyncio.run(inspect_queue()),ensure_ascii=False,indent=2));return
     if args.command=='reconcile-receipt':
-        import sqlite3,shutil,uuid
+        import sqlite3,shutil
         from filelock import FileLock
         from backend.core.external_service import update_projection,update_reconciled_status
         with FileLock(str(data/'application-worker.lock'),timeout=0):

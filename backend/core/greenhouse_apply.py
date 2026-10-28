@@ -5,10 +5,12 @@ import json
 from pathlib import Path
 import re
 import urllib.request
+from datetime import datetime
 from urllib.parse import urlsplit
 
 from .application_safety import SafetyError,now
 from .easy_answers import AnswerBook,normalized,digest,damaged_text
+from .automatic_answers import resolve_answer
 from .submission_monitor import ERROR,greenhouse_job_id,clean_url
 
 
@@ -61,8 +63,10 @@ async def preflight_greenhouse(data,job):
         if field['type']=='file' and field['id']=='resume':continue
         if field['type'] in ('file','unsupported'):
             pending.append({'question':field['label'],'reason':'unsupported_required_control','control':field.get('control')});metrics['pending']+=1;continue
-        answer=book.resolve(field,job);metrics[answer['source']]+=1
-        if 'pending' in answer:pending.append({'question':field['label'],'answer_id':answer['pending'],'reason':'unconfirmed_answer'})
+        answer=await resolve_answer(book,field,job,metrics);metrics[answer['source']]+=1
+        if 'pending' in answer:pending.append({'question':field['label'],'answer_id':answer['pending'],
+            'reason':'approval_required' if answer.get('approval_required') else 'unconfirmed_answer',
+            'proposal_state':answer.get('proposal_state'),'proposal_reason':answer.get('proposal_reason')})
     result={'url':job['url'],'checked_at':now(),'ready_for_browser':not pending,'pending':pending,'answer_metrics':metrics,'facts_version':book.version}
     directory=Path(data)/'external/preflight';directory.mkdir(parents=True,exist_ok=True)
     board,identifier=greenhouse_job_id(job['url'])
@@ -221,14 +225,14 @@ class GreenhouseAdapter:
             if field['type'] not in ('text','textarea','select-one','checkbox-group','phone-country','location'):
                 if field['required']:missing.append('Unsupported control: '+field['label'])
                 continue
-            answer=self.book.resolve(field,self.job) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))
+            answer=await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))
             if not answer:continue
             self.metrics[answer['source']]+=1
             if 'pending' in answer:missing.append(str(answer['pending']));continue
             await self.set(field,answer)
         for field in await self.inspect():
             if field.get('category')!='demographic-consent':continue
-            answer=self.book.resolve(field,self.job);self.metrics[answer['source']]+=1
+            answer=await resolve_answer(self.book,field,self.job,self.metrics);self.metrics[answer['source']]+=1
             if 'pending' in answer:missing.append(str(answer['pending']))
             else:await self.set(field,answer)
         if missing:
@@ -263,9 +267,11 @@ class GreenhouseAdapter:
 
     async def handle_email_verification(self):
         self.stage('awaiting_email_verification')
-        await self.monitor.wait_for_intervention(
-            'Insira o codigo de 8 caracteres recebido por email na janela aberta. Nao clique em enviar; confirme no terminal/app depois.',
-            allow_email_transition=False)
+        automatic=await self.fill_email_code()
+        if not automatic:
+            await self.monitor.wait_for_intervention(
+                'Insira o codigo de 8 caracteres recebido por email na janela aberta. Nao clique em enviar; confirme no terminal/app depois.',
+                allow_email_transition=False)
         if self.monitor.terminal:return
         complete=await self.page.locator('.email-verification [id^="security-input-"]').evaluate_all(
             'es=>es.length===8&&es.every(e=>e.value.trim().length===1&&e.getAttribute("aria-invalid")!=="true")')
@@ -278,6 +284,39 @@ class GreenhouseAdapter:
         self.stage('submit_verified_email')
         self.monitor.arm_submission(self.job['url'])
         await self.page.get_by_role('button',name=re.compile(r'^(Submit application|Enviar candidatura|Enviar inscrição)$',re.I)).click()
+
+    async def fill_email_code(self):
+        from .gmail_mailbox import GmailMailbox,MailError,expected_email,wait_for_code
+        from .external_service import remaining_budget
+        if not GmailMailbox(self.data).status()['authorized']:return False
+        if not remaining_budget(self.book.store):
+            self.book.store.event(self.attempt,'gmail_verification_unavailable',{'reason':'daily_limit'})
+            return False
+        try:
+            if self.monitor.response_tasks:
+                await asyncio.gather(*list(self.monitor.response_tasks),return_exceptions=True)
+            email=expected_email(self.data)
+            text=await self.page.locator('.email-verification').inner_text()
+            if email.lower() not in text.lower():raise MailError('Portal verification recipient differs from candidate email')
+            sends=self.book.store.submissions(self.attempt)
+            if len(sends)!=1:raise MailError('Email verification requires one original send')
+            self.stage('waiting_for_email_code')
+            code=await wait_for_code(self.data,self.attempt,
+                [self.schema.get('company_name',''),self.job.get('company',''),self.job.get('board','')],
+                datetime.fromisoformat(sends[0]['at']).timestamp(),self.status)
+            if not code:
+                self.book.store.event(self.attempt,'gmail_verification_unavailable',{'reason':'mail_timeout'})
+                return False
+            outcome=self.monitor.observed_outcome(await self.monitor.observe())
+            if outcome:await self.monitor.finish(*outcome);return True
+            controls=self.page.locator('.email-verification [id^="security-input-"]')
+            if await controls.count()!=8:raise MailError('The original email verification session is no longer available')
+            for i,character in enumerate(code.code):await self.target('security-input-'+str(i)).fill(character)
+            self.book.store.event(self.attempt,'gmail_verification_filled',{'message_id':code.message_id,'received_at':code.received_at})
+            return True
+        except MailError as error:
+            self.book.store.event(self.attempt,'gmail_verification_unavailable',{'reason':str(error)})
+            return False
 
     async def run(self,resume,execution='review'):
         self.resume=Path(resume)

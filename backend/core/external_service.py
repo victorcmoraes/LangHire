@@ -89,6 +89,7 @@ async def run_external(data,body,status):
     data=Path(data);store=AttemptStore(data);started=time.monotonic();owned=set()
     (data/'reports').mkdir(exist_ok=True)
     status.setdefault('mode','external');status.setdefault('running',True)
+    status.setdefault('answer_run_id',uuid.uuid4().hex)
     jobs=queue(data)
     if getattr(body,'platform',None):jobs=[j for j in jobs if j['platform']==body.platform]
     if body.job_url:jobs=[j for j in jobs if canonical_ats(j['url'])==canonical_ats(body.job_url)]
@@ -109,6 +110,7 @@ async def run_external(data,body,status):
         with FileLock(str(data/'application-worker.lock'),timeout=0):
             store.recover()
             for job in jobs:
+                job=dict(job,_answer_run_id=status['answer_run_id'])
                 if status.get('cancel_requested'):break
                 if body.execution=='submit' and platform_hold(data,job['platform']):
                     status.setdefault('paused_channels',{})[job['platform']]='verification_diagnosis'

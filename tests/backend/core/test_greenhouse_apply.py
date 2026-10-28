@@ -34,7 +34,7 @@ async def hosted_gh(tmp_path):
     <script>
     fetch('/uncacheable_attributes/presigned_fields').then(r=>r.json()).then(()=>window.uploaderReady=true);
     function choose(e,value){const container=e.closest('.select__container');container.querySelector('.select__single-value').textContent=e.textContent;container.querySelector('.select__requiredInput').value=value;container.querySelector('#english').value='';document.getElementById('choices').hidden=true;}
-    document.querySelector('form').onsubmit=async e=>{e.preventDefault();const code=[...document.querySelectorAll('[id^="security-input-"]')].map(e=>e.value).join('');const r=await fetch('https://boards.greenhouse.io/fixture/jobs/123',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_application:{first_name:document.getElementById('first_name').value,email:document.getElementById('email').value},...(code?{security_code:code}:{})})});const result=await r.json();if(r.status===428&&result.code==='captcha-failed'){const field=document.createElement('div');field.className='email-verification';field.textContent='A verification code was sent. Enter the 8-character code.';for(let i=0;i<8;i++){const input=document.createElement('input');input.id='security-input-'+i;input.setAttribute('aria-required','true');input.maxLength=1;field.append(input);}e.target.append(field);}else{if(r.ok)history.replaceState(null,'','/fixture/jobs/123/confirmation');document.body.innerText=r.ok?'Thank you for applying':'There was an error verifying your application';}};
+    document.querySelector('form').onsubmit=async e=>{e.preventDefault();const code=[...document.querySelectorAll('[id^="security-input-"]')].map(e=>e.value).join('');const r=await fetch('https://boards.greenhouse.io/fixture/jobs/123',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({job_application:{first_name:document.getElementById('first_name').value,email:document.getElementById('email').value},...(code?{security_code:code}:{})})});const result=await r.json();if(r.status===428&&result.code==='captcha-failed'){const field=document.createElement('div');field.className='email-verification';field.textContent='A verification code was sent to test@example.invalid. Enter the 8-character code.';for(let i=0;i<8;i++){const input=document.createElement('input');input.id='security-input-'+i;input.setAttribute('aria-required','true');input.maxLength=1;field.append(input);}e.target.append(field);}else{if(r.ok)history.replaceState(null,'','/fixture/jobs/123/confirmation');document.body.innerText=r.ok?'Thank you for applying':'There was an error verifying your application';}};
     </script>'''
     received=[];state={'status':200,'email_code_required':False}
     async with async_playwright() as p:
@@ -211,3 +211,25 @@ async def test_email_code_waits_for_human_then_creates_a_second_counted_attempt(
         assert db.execute('SELECT COUNT(*) FROM submissions').fetchone()[0]==2
         assert 'ABCDEFGH' not in ' '.join(row[0] for row in db.execute('SELECT payload FROM events'))
     with pytest.raises(SafetyError):store.begin(URL)
+
+
+async def test_email_code_is_filled_automatically_without_ack_or_model(hosted_gh,monkeypatch):
+    from core.gmail_mailbox import GmailMailbox,VerificationCode
+    from core.application_safety import now
+    adapter,pdf,received,store,parent,page,state=hosted_gh;state['email_code_required']=True
+    monkeypatch.setattr(GmailMailbox,'status',lambda self:{'authorized':True})
+    async def find(data,aid,companies,sent,cancel):
+        assert aid==parent and store.submissions(aid)[0]['http_status']==428
+        assert 'Fixture' in companies
+        return VerificationCode('ABCDEFGH','abc123',now())
+    monkeypatch.setattr('core.gmail_mailbox.wait_for_code',find)
+    async def forbidden(*args,**kwargs):raise AssertionError('Email code requires no human acknowledgement')
+    monkeypatch.setattr(adapter.monitor,'wait_for_intervention',forbidden)
+    await adapter.run(pdf,'submit')
+    child=adapter.monitor.attempt_id
+    assert child!=parent and store.get(child)['state']=='confirmed'
+    assert len(received)==2 and received[-1]['security_code']=='ABCDEFGH'
+    assert store.get(parent)['acknowledged']==0
+    with store.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='gmail_verification_filled'",(parent,)).fetchone()[0]==1
+        assert 'ABCDEFGH' not in ' '.join(r[0] for r in db.execute('SELECT payload FROM events'))

@@ -80,6 +80,12 @@ All answers in this scan came from rules or approved cache, without model calls.
 An additional otherwise-fillable job is held because a required working schedule
 has not been confirmed. Technical experience does not establish availability.
 
+Automatic local Qwen3 8b proposals and local Gmail OAuth are now available; setup,
+first-answer approval and live-session email continuation are described in
+[GMAIL_LOCAL.md](GMAIL_LOCAL.md). The existing chat plugin connection is not a
+local OAuth credential. Without local authorization, email verification continues
+to require human intervention. CAPTCHA handling remains manual.
+
 Equivalent questions with the same displayed option set and context share a
 pending answer even when their ATS option IDs differ. An approval is translated
 back to each form's own IDs; review checks both the accepted value and original

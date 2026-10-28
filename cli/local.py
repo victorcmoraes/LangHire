@@ -22,6 +22,11 @@ def doctor():
               "resume": Path(load_settings().get("resume_path", "")).is_file(),
               "provider": llm.get("provider"), "model": llm.get("ollama", {}).get("model"),
               "model_approval": "not_validated"}
+    from backend.core.gmail_mailbox import GmailMailbox
+    report['gmail']=GmailMailbox(data).status()
+    path=data/'settings.json'
+    policy=json.loads(path.read_text(encoding='utf-8')).get('automation_answers',{}) if path.exists() else {}
+    report['automatic_answer_proposals']=policy.get('enabled') is True
     approval = data / "model_approval.json"
     if approval.exists():
         report["model_approval"] = json.loads(approval.read_text(encoding="utf-8"))
