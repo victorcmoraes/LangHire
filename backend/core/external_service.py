@@ -47,7 +47,7 @@ def queue(data):
     for decision in triage['decisions']:
         if decision['state']!='eligible':continue
         key=(decision['platform'],decision['board'],decision['externalId']);job=by.get(key)
-        if not job:continue
+        if not job or job['platform'] not in ('lever','greenhouse'):continue
         title=core_title(job['title'])
         match=re.search(r'\b(?:job[\s-]*)?(\d{5})\b',job['title'],re.I)
         duplicate=(job['board'],match[1]) if match else (job['board'],title)
@@ -109,7 +109,7 @@ async def run_external(data,body,status):
     (data/'reports').mkdir(exist_ok=True)
     status.setdefault('mode','external');status.setdefault('running',True)
     status.setdefault('answer_run_id',uuid.uuid4().hex)
-    jobs=queue(data)
+    jobs=[j for j in queue(data) if j['platform'] in ('lever','greenhouse')]
     if getattr(body,'platform',None):jobs=[j for j in jobs if j['platform']==body.platform]
     if body.job_url:jobs=[j for j in jobs if canonical_ats(j['url'])==canonical_ats(body.job_url)]
     elif body.job_urls:

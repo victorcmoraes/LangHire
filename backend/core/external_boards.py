@@ -16,7 +16,7 @@ from .external_qualification import home_cities,qualify
 from .job_tracks import load_job_tracks,matches_track
 
 
-LINK=re.compile(r'https://(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|jobs\.lever\.co)/[A-Za-z0-9][A-Za-z0-9_-]{0,99}(?=[/\s?\"<>]|$)',re.I)
+LINK=re.compile(r'https://(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com)/[A-Za-z0-9][A-Za-z0-9_-]{0,99}(?=[/\s?\"<>]|$)',re.I)
 CACHE_SECONDS=86400
 
 

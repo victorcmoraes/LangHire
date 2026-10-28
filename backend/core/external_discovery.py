@@ -24,13 +24,13 @@ def board_spec(value):
         p=urlsplit(value)
         if p.scheme!='https' or p.port not in (None,443) or p.username or p.password:
             raise SafetyError('Use an official HTTPS job-board URL')
-        platform={'jobs.lever.co':'lever','job-boards.greenhouse.io':'greenhouse','boards.greenhouse.io':'greenhouse'}.get(p.hostname)
+        platform={'jobs.lever.co':'lever','job-boards.greenhouse.io':'greenhouse','boards.greenhouse.io':'greenhouse','jobs.ashbyhq.com':'ashby'}.get(p.hostname)
         board=p.path.strip('/').split('/')[0]
     else:
         parts=value.split(':',1)
-        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company or lever:company')
+        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company, lever:company or ashby:company')
         platform,board=parts
-    if platform not in ('lever','greenhouse') or not isinstance(board,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}',board):
+    if platform not in ('lever','greenhouse','ashby') or not isinstance(board,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}',board):
         raise SafetyError('Invalid public ATS board')
     return {'platform':platform,'board':board}
 
