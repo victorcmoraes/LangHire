@@ -266,7 +266,12 @@ class GreenhouseAdapter:
             if await error.is_visible() and ((await error.inner_text()).strip() or await error.get_attribute('aria-invalid')=='true'):problems.append('Visible portal validation error')
         text=await self.page.locator('body').inner_text()
         if ERROR.search(text):problems.append('Portal application error')
-        if damaged_text(text):problems.append('Damaged text encoding')
+        # Employer copy can contain legitimate punctuation such as "produção?Se".
+        # Validate submitted values, rather than treating the entire job posting
+        # as candidate-generated text.
+        if any(damaged_text(value) for field in fields
+               for value in (field['value'] if isinstance(field['value'],list) else [field['value']])):
+            problems.append('Damaged answer text encoding')
         snapshot={'job_url':self.job['url'],'title':self.job['title'],'answers':self.used,'fields':fields,'resume_hash':self.resume_hash,'facts_version':self.book.version}
         return {'ready':not problems,'reason':'; '.join(problems),'snapshot':snapshot,'digest':digest(snapshot)}
 

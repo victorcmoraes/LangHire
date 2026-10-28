@@ -289,6 +289,18 @@ def test_company_relationship_and_discovery_use_actual_job_context(tmp_path):
     assert b.resolve(detail,job)['value']=='Greenhouse careers page'
 
 
+def test_salary_expectation_and_recent_process_confirmation_do_not_leak_to_other_roles(tmp_path):
+    b=book(tmp_path);job={'url':'one','company':'Example','title':'Backend','salary_currency':'BRL','salary_period':'monthly'}
+    q={'label':'Pretensão Salarial','type':'text','options':[]}
+    aid=b.resolve(q,job)['pending'];b.approve(aid,'7000')
+    assert b.resolve(q,job)['value']=='7000'
+    assert 'pending' in b.resolve(q,dict(job,title='Data'))
+    assert 'pending' in b.resolve(q,dict(job,company='Other'))
+    q={'label':'Você participou de processo seletivo da Example nos últimos 6 meses?','type':'text','options':[]}
+    aid=b.resolve(q,job)['pending'];b.approve(aid,'Não')
+    assert 'pending' in b.resolve(q,dict(job,url='two'))
+
+
 @pytest.mark.parametrize('label',[
     'Sinalize com qual raça/cor você se identifica',
     'Sinalize com qual identidade de gênero você se identifica',

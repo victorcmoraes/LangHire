@@ -12,6 +12,7 @@ from core.submission_monitor import SubmissionMonitor, is_submission, clean_url,
 @pytest.mark.parametrize('text',[
     "Thank you for your application! We're thrilled to know you're considering being part of our team!",
     'Agradecemos sua inscrição! Ficamos muito felizes em saber que você considera fazer parte do nosso time!',
+    'Agradecemos a aplicação em nosso processo! Sua aplicação foi recebida e nosso time entrará em contato.',
 ])
 def test_hosted_confirmation_template_requires_its_own_job_receipt_route(text):
     from core.submission_monitor import SUCCESS

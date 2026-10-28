@@ -186,6 +186,10 @@ class AnswerBook:
         if re.search(r'\b(?:voce|qual|quais|possui|sua|seu|nacionalidade|raca|genero|orientacao)\b',q):context['language']='pt'
         if re.search(r'why.{0,60}(?:this role|this position|our team)|interest.{0,40}(?:role|position)|por que.{0,60}(?:vaga|equipe)',q):
             context['company']=job.get('company','');context['role']=job.get('title','')
+        if salary_question(question) and re.search(r'pretensao|expected|desired|expectation',q):
+            context['company']=job.get('company','');context['role']=job.get('title','')
+        if re.search(r'participou.{0,50}processo seletivo',q):
+            context.update(company=job.get('company',''),application_context=job['url'])
         if (re.search(r'how did you hear|como (?:soube|ficou sabendo|conheceu)|if it is from an event|if you clicked other',q)
                 and job.get('collection_origin')=='bounded_public_greenhouse_board'):
             from urllib.parse import urlsplit

@@ -18,7 +18,7 @@ from .application_safety import ACTIVE, AttemptStore, SafetyError, job_key
 SUCCESS = re.compile(
     r"application (?:has been |was )?(?:successfully )?submitted|"
     r"we (?:have |have successfully )?received your application|thank you for (?:applying|your application)|"
-    r"candidatura (?:foi )?(?:enviada|recebida)(?: com sucesso)?|"
+    r"(?:candidatura|aplica[çc][ãa]o) (?:foi )?(?:enviada|recebida)(?: com sucesso)?|"
     r"agradecemos (?:a )?sua inscri[çc][ãa]o", re.I)
 ERROR = re.compile(
     r"error verifying your application|unable to submit|application (?:was )?not submitted|"

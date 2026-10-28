@@ -66,6 +66,20 @@ async def test_greenhouse_schema_controls_upload_and_known_language_without_send
     await page.locator('#last_name').fill('Other')
     assert not (await adapter.review())['ready']
 
+
+async def test_employer_question_punctuation_does_not_mask_answer_encoding_validation(hosted_gh):
+    adapter,pdf,received,store,aid,page,_=hosted_gh
+    fill=adapter.fill
+    async def with_punctuation():
+        await page.locator('#application-form').evaluate("f=>{const p=document.createElement('p');p.textContent='Worked in production?If so, describe it.';f.append(p)}")
+        await fill()
+    adapter.fill=with_punctuation
+    await adapter.run(pdf,'review')
+    assert (await adapter.review())['ready'] and not received
+    await page.locator('#first_name').fill('Integra??o')
+    review=await adapter.review()
+    assert not review['ready'] and 'Damaged answer text encoding' in review['reason']
+
 async def test_greenhouse_native_final_shape_confirms_once(hosted_gh):
     adapter,pdf,received,store,aid,page,_=hosted_gh
     await adapter.run(pdf,'submit')
