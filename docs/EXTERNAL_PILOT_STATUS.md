@@ -47,6 +47,46 @@ work; external operation has not been released in the packaged desktop. The
 shared daily pilot ceiling remains ten attempts. The larger pilot and 200/day
 release gate remain unchanged.
 
+## Lever verification diagnosis (no send)
+
+Both portal rejections share one shape: the resume upload was accepted, the
+review passed, the submit button opened a human hCaptcha, and the document POST
+left within milliseconds of the challenge closing. The portal answered HTTP 400
+with "There was an error verifying your application". One rejection came from an
+aggregator board and one from a direct employer board, using the single
+diagnostic allowance. The two older uncertain attempts never reached the portal:
+the local monitor blocked them (a review timeout and a second-send guard).
+
+Hypotheses, most to least supported:
+
+1. Risk scoring of the browser session. Lever loads hCaptcha's enterprise
+   `secure-api.js`, whose token carries a session risk assessment. The session
+   is attached over CDP with every request routed through Playwright, telemetry
+   POSTs aborted, the form typed and clicked programmatically, and the submit
+   click about six seconds after page load. A human solving the visible
+   challenge does not change those signals, so an assisted mode in which the
+   automation fills and the human solves the CAPTCHA and clicks is exactly
+   what already failed twice.
+2. Empty or expired `h-captcha-response`. Lever's own inline script notes that
+   an implicit submission (Enter in a text field, or the hidden
+   `hcaptchaSubmitBtn`) posts an empty token. The adapter clicks the visible
+   `btn-submit`, which runs `hcaptcha.execute` first, so this is unlikely. Token
+   expiry is ruled out: one challenge took 2.5 minutes, the other 7 seconds, and
+   both posts left immediately after.
+3. Missing hidden field. The form carries `accountId`, `timezone`,
+   `selectedLocation`, `resumeStorageId` and the hCaptcha input. Evidence shows
+   the resume accepted and the location token validated before review.
+4. Board origin. Ruled out as the sole cause: aggregator and direct boards fail
+   the same way.
+
+Next step requires approval: a manual control in which the user applies to one
+new Lever job by hand, in a normal browser session with no CDP attachment. If
+it succeeds, the cause is hypothesis 1. Removing those signals would be
+evasion, so Lever would become fully manual: the system prepares reviewed
+answers and the user fills and submits without automation attached, with
+confirmation from the portal page or the receipt email. If it fails, the cause
+is the account or profile, and Lever stays paused.
+
 ## Additional ATS: Ashby, Workable, SmartRecruiters
 
 Collection only. These platforms have no executor; their eligible jobs go to
@@ -75,3 +115,11 @@ outside an explicit allowlist, with or without a hold file.
 A dry run on a copy of the local data over thirteen real boards added 32 Ashby
 and 286 SmartRecruiters jobs: 19 eligible, all on SmartRecruiters. Application
 forms were not opened in a browser yet; that is the next phase, in review mode.
+
+## Gupy feasibility
+
+Stopped at phase 0. The candidate terms (version of 2026-07-01) forbid
+"agregar, copiar ou duplicar partes do Gupy Recrutamento e Seleção, incluindo
+oportunidades de trabalho", besides applying on behalf of others. The public
+API at developers.gupy.io is for employer accounts. No collection or
+application code was written; the decision is the user's.
