@@ -88,3 +88,64 @@ Next experiment requires separate approval: a manual application to a fresh Leve
 job in the same profile. Only after that control should an explicitly approved
 single automated experiment be considered. Preserve uncertain identities and the
 platform hold; do not retry them. Phase 2 and Phase 3 have not started.
+
+## Ashby: Phase 0 checkpoint, 2026-10-28
+
+The [official Job Postings API](https://developers.ashbyhq.com/docs/public-job-posting-api)
+documents `GET https://api.ashbyhq.com/posting-api/job-board/{board}`.
+Two small live probes returned HTTP 200, API version 1 and job arrays. Fields
+include IDs, descriptions, primary/secondary locations, hosted/application URLs,
+`isListed` and `workplaceType`. Use `workplaceType`, since `isRemote` includes
+hybrid jobs; missing countries require evidence rather than inference. Keep
+unlisted postings out of discovery.
+
+The [customer terms](https://www.ashbyhq.com/resources/terms) prohibit security
+circumvention and disruptive use. Their customer scope does not establish a
+general third-party ingestion license. The documented
+[partner-feed route](https://developers.ashbyhq.com/docs/dedicated-partner-job-feeds)
+uses employer opt-in; resolve the appropriate source scope before scaling.
+
+Read-only browser inspection allowed GETs and GraphQL operations explicitly
+declared as queries. Mutations remained blocked; no fields were filled or files
+uploaded. One hosted form loaded name/email, resume upload, custom questions,
+location selection and optional demographic controls. Several required questions
+ask for specific past experience and would need confirmed evidence. A reCAPTCHA
+Enterprise frame was present; no challenge was solved. Email verification and
+post-submission confirmation remain unobserved.
+
+The second application's URL, returned by the API, responded HTTP 404. Earlier
+local inspections blocked schema queries too, producing a local instrumentation
+failure; that is not evidence of a portal restriction. After correcting the
+read-only inspection, the second URL still returned 404.
+
+Phase 0 is incomplete: obtain a second working hosted form, document its upload,
+custom questions and verification behavior, and resolve source scope. The API
+alone does not satisfy the phase gate. No Ashby collector, adapter, registry entry
+or submission support was added. Future integration must default to `platform_hold`.
+
+## Workable: Phase 0 checkpoint, 2026-10-28
+
+The [official public API reference](https://workable.readme.io/reference/jobs-1)
+documents `GET https://www.workable.com/api/accounts/{subdomain}?details=true`,
+with a public jobs array and workplace metadata. This differs from the speculative
+`apply.workable.com/api/...` route in the plan. The
+[careers integration guide](https://help.workable.com/hc/en-us/articles/115012771647-Using-the-Workable-API-to-create-a-careers-page)
+also describes this public route separately from the authenticated SPI API.
+
+The [customer terms](https://www.workable.com/terms) restrict misuse and
+circumvention. The single live probe using the vendor's name as the account slug
+returned HTTP 404. That result does not invalidate the documented endpoint or
+establish a platform block; no working account has been verified here. Two form
+inspections, account-specific source checks and confirmation behavior remain
+pending. Phase 0 is incomplete, and no collection or application code was added.
+
+## SmartRecruiters: Phase 0 source restriction, 2026-10-28
+
+The [Posting API reference](https://developers.smartrecruiters.com/reference/v1listpostings)
+documents `GET https://api.smartrecruiters.com/v1/companies/{companyIdentifier}/postings`.
+However, the [candidate terms](https://www.smartrecruiters.com/legal/terms-of-use/)
+restrict automated access to other users' content. Under this project's explicit
+stop-on-restriction rule, no company feed requests or form inspections were made.
+Use an authorized integration agreement before reconsidering this source. The
+documented API's existence alone does not settle permission for this use case.
+Phase 0 has not passed; no collector, adapter or registry entry was added.
