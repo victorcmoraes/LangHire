@@ -46,3 +46,32 @@ in ignored `.local/`. The external executor and catalog are still development
 work; external operation has not been released in the packaged desktop. The
 shared daily pilot ceiling remains ten attempts. The larger pilot and 200/day
 release gate remain unchanged.
+
+## Additional ATS: Ashby, Workable, SmartRecruiters
+
+Collection only. These platforms have no executor; their eligible jobs go to
+`external/manual-queue.json` and `platform_hold` refuses sends for any platform
+outside an explicit allowlist, with or without a hold file.
+
+- Ashby: documented public posting API,
+  `GET https://api.ashbyhq.com/posting-api/job-board/{board}`. Unlisted postings
+  are skipped. `isRemote` is also true for hybrid jobs, so only `workplaceType`
+  is used. Application pages load Google reCAPTCHA; submissions go through an
+  undocumented GraphQL endpoint. Risk: score-based CAPTCHA, as with Lever.
+- Workable: the account endpoint documented in Workable's help center
+  (`www.workable.com/api/accounts/{account}`) redirects to
+  `apply.workable.com/api/v1/widget/accounts/{account}?details=true`. Several
+  large accounts return no jobs there, so coverage depends on the account's
+  widget setting. Application pages enable Cloudflare Turnstile. Job URLs
+  (`/j/{shortcode}`) do not name the account; the duplicate key is the
+  shortcode.
+- SmartRecruiters: public Posting API,
+  `GET https://api.smartrecruiters.com/v1/companies/{company}/postings`, which
+  returns 200 with zero results for unknown companies. Listing is limited to
+  `country=br` and five pages; a larger board fails rather than closing jobs.
+  Descriptions need one detail request per posting, skipped for titles outside
+  the configured tracks.
+
+A dry run on a copy of the local data over thirteen real boards added 32 Ashby
+and 286 SmartRecruiters jobs: 19 eligible, all on SmartRecruiters. Application
+forms were not opened in a browser yet; that is the next phase, in review mode.

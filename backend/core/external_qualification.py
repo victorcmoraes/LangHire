@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from .application_safety import AttemptStore,job_key
 from .easy_answers import AnswerBook,normalized
-from .external_catalog import identity
+from .external_catalog import PLATFORMS,identity
 from .job_tracks import load_job_tracks,matches_track
 
 
@@ -90,7 +90,8 @@ def qualify(job,facts,tracks=None):
     # Benefits that mention occasional remote work are not a job's arrangement.
     explicit_mode=re.search(r'(?:work\s*type|\bmode|modalidade|modelo(?: de (?:trabalho|atua[çc][ãa]o))?)\s*:\s*(remot[eo]|hybrid|h[íi]brid[oa]|on.?site|presencial)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
-    metadata_remote=job.get('platform',job.get('source'))=='lever' and job.get('workplaceType')=='remote'
+    # Greenhouse has no structured arrangement; the other boards publish one.
+    metadata_remote=job.get('platform',job.get('source'))!='greenhouse' and job.get('workplaceType')=='remote'
     # A stated location policy is evidence; a generic country mention or
     # occasional remote-work benefit is not.
     home_policy=re.search(r'(?:can|may) (?:live|work) anywhere in (?:Brazil|Brasil)|(?:pode\w*|possibilidade de) (?:morar|trabalhar) (?:de |em )?qualquer (?:lugar|local) (?:do |no )?Brasil',description,re.I)
@@ -123,7 +124,7 @@ def triage(data_dir):
     data=Path(data_dir);tracks=load_job_tracks(data);book=AnswerBook(data);store=AttemptStore(data)
     catalog=json.loads((data/'external/catalog.json').read_text(encoding='utf-8'))
     jobs=json.loads((data/'jobs.json').read_text(encoding='utf-8'))
-    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse')}
+    previous={identity(j):j for j in jobs.values() if j.get('source') in PLATFORMS}
     current={identity(j):j for j in catalog['jobs']}
     boards={(b['platform'],b['board']):b for b in catalog['boards']}
     protected={job_key(a['job_url']) for a in store.list() if a['state'] in ('confirmed','uncertain','running','submitted','awaiting_human')}

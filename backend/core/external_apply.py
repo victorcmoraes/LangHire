@@ -58,7 +58,14 @@ def field_key(field):
     return (field.get('id') or field.get('name') or normalized(field['label']),field['type'])
 
 
+# Collected platforms without a reviewed executor stay manual. Sending is a
+# separate, explicit decision taken only after a supervised pilot.
+EXECUTORS=('lever','greenhouse')
+SUBMIT_PLATFORMS=('lever','greenhouse')
+
+
 def platform_hold(data,platform,job=None):
+    if platform not in SUBMIT_PLATFORMS:return True
     path=Path(data)/'external'/(platform+'-verification-hold.json')
     if not path.exists():return False
     hold=json.loads(path.read_text(encoding='utf-8'))
@@ -270,7 +277,7 @@ async def execute_external(job,data,resume,execution='review',status=None,lease_
         if job.get('_batch_id'):store.event(aid,'external_batch',{'batch_id':job['_batch_id'],'attempt_id':aid})
         if job.get('external_qualification'):store.event(aid,'external_qualification',job['external_qualification'])
         try:
-            if job['platform'] not in ('lever','greenhouse'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
+            if job['platform'] not in EXECUTORS:raise SafetyError('Unsupported hosted ATS; not using a generic agent')
             adapter_type=LeverAdapter
             if job['platform']=='greenhouse':
                 from .greenhouse_apply import GreenhouseAdapter

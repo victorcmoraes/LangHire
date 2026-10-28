@@ -11,10 +11,14 @@ import urllib.request
 from filelock import FileLock
 
 from .application_safety import SafetyError,now,job_key
-from .external_catalog import refresh_board,identity,lever_job
+from .external_catalog import PLATFORMS,refresh_board,identity,lever_job
 from .external_qualification import home_cities,qualify,triage
 from .job_tracks import load_job_tracks,matches_track
 from .easy_answers import AnswerBook
+
+
+BOARD_HOSTS={'jobs.lever.co':'lever','job-boards.greenhouse.io':'greenhouse','boards.greenhouse.io':'greenhouse',
+             'jobs.ashbyhq.com':'ashby','apply.workable.com':'workable','jobs.smartrecruiters.com':'smartrecruiters'}
 
 
 def board_spec(value):
@@ -24,13 +28,15 @@ def board_spec(value):
         p=urlsplit(value)
         if p.scheme!='https' or p.port not in (None,443) or p.username or p.password:
             raise SafetyError('Use an official HTTPS job-board URL')
-        platform={'jobs.lever.co':'lever','job-boards.greenhouse.io':'greenhouse','boards.greenhouse.io':'greenhouse'}.get(p.hostname)
+        platform=BOARD_HOSTS.get(p.hostname)
         board=p.path.strip('/').split('/')[0]
+        # A Workable job link (/j/<shortcode>) does not name the account.
+        if platform=='workable' and board=='j':raise SafetyError('Use the Workable account URL, not a job link')
     else:
         parts=value.split(':',1)
-        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company or lever:company')
+        if len(parts)!=2:raise SafetyError('Board format: platform:company, platform one of '+', '.join(PLATFORMS))
         platform,board=parts
-    if platform not in ('lever','greenhouse') or not isinstance(board,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}',board):
+    if platform not in PLATFORMS or not isinstance(board,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}',board):
         raise SafetyError('Invalid public ATS board')
     return {'platform':platform,'board':board}
 
@@ -54,7 +60,8 @@ def candidate_location(job,cities=()):
     return job.get('country')=='BR' or bool(re.search('|'.join(places),job.get('location',''),re.I))
 
 
-def scoped_board(platform,board,aggregator_pages):
+def scoped_board(platform,board,aggregator_pages,relevant=None):
+    if platform=='smartrecruiters':return refresh_board(platform,board,relevant),{}
     if (platform,board)!=('lever','jobgether'):
         return refresh_board(platform,board),{}
     jobs={};checked=0;more=False
@@ -86,7 +93,7 @@ def discover(data,boards=(),max_new=5000,workers=3,aggregator_pages=5):
         # All results are merged in registry order, regardless of HTTP completion order.
         fetched={};errors={}
         with ThreadPoolExecutor(max_workers=min(3,max(1,workers))) as pool:
-            futures={pool.submit(scoped_board,b['platform'],b['board'],aggregator_pages):(b['platform'],b['board']) for b in selected}
+            futures={pool.submit(scoped_board,b['platform'],b['board'],aggregator_pages,lambda title:matches_track(title,tracks)):(b['platform'],b['board']) for b in selected}
             for future in as_completed(futures):
                 key=futures[future]
                 try:fetched[key]=future.result()

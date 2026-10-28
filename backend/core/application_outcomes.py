@@ -61,7 +61,8 @@ def company_names(job):
 
 def platform(job,url):
     host=(urlsplit(url).hostname or '').removeprefix('www.')
-    return job.get('platform') or next((p for p in ('linkedin','greenhouse','lever') if p in host),host)
+    hosts=(('linkedin','linkedin'),('greenhouse','greenhouse'),('lever','lever'),('ashby','ashbyhq'),('workable','workable'),('smartrecruiters','smartrecruiters'))
+    return job.get('platform') or next((p for p,name in hosts if name in host),host)
 
 
 def compact(text):

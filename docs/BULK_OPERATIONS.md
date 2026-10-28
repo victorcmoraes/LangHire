@@ -26,6 +26,10 @@ legacy refresh of known imported identities. Add official hosted boards with:
 .venv\Scripts\python.exe -m cli.external discover --board greenhouse:company --board lever:company --aggregator-pages 5
 ```
 
+`ashby:<board>`, `workable:<account>` and `smartrecruiters:<company>` boards are
+collected and triaged but have no executor: their eligible jobs are written to
+`.local/external/manual-queue.json` for applying by hand, and sends stay refused.
+
 Filtered aggregator pages cannot prove that missing global postings closed.
 See the [Lever postings API](https://github.com/lever/postings-api) for its
 company-scoped location filters and pagination.

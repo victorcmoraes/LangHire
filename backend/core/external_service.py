@@ -12,7 +12,7 @@ from filelock import FileLock
 
 from .application_safety import AttemptStore, SafetyError, job_key
 from .easy_answers import AnswerBook,normalized
-from .external_apply import execute_external,canonical_ats,platform_hold
+from .external_apply import execute_external,canonical_ats,platform_hold,EXECUTORS
 from .external_catalog import identity
 
 
@@ -43,7 +43,7 @@ def queue(data):
     named_titles={core_title(known[k]['title']) for k in protected if k in known
                   and company_title(known[k])[0].replace(' ','') in core_title(known[k]['title']).replace(' ','')
                   and company_title(known[k])[0]}
-    kept=[];isolated=[];seen=set()
+    kept=[];isolated=[];manual=[];seen=set()
     for decision in triage['decisions']:
         if decision['state']!='eligible':continue
         key=(decision['platform'],decision['board'],decision['externalId']);job=by.get(key)
@@ -54,6 +54,8 @@ def queue(data):
         if job_key(job['url']) in protected or company_title(job) in protected_titles or (job.get('board')=='jobgether' and title in named_titles) or duplicate in seen:
             isolated.append({'url':job['url'],'reason':'protected_or_possible_duplicate','title':job['title']});continue
         seen.add(duplicate)
+        if job['platform'] not in EXECUTORS:
+            manual.append({'url':job['url'],'platform':job['platform'],'company':job.get('company',''),'title':job['title'],'location':job.get('location','')});continue
         kept.append(dict(job,external_qualification=decision,
                          collection_origin=known.get(job_key(job['url']),{}).get('collection_origin',job.get('collection_origin'))))
     # Cached readiness changes priority only; execution checks a fresh schema
@@ -69,6 +71,8 @@ def queue(data):
         except (OSError,ValueError,KeyError,TypeError):return True
     kept.sort(key=lambda j:(ready_priority(j),0 if re.search('back.?end|java|python',j['title'],re.I) else 1,j['title']))
     (data/'external/isolated-duplicates.json').write_text(json.dumps(isolated,ensure_ascii=False,indent=2),encoding='utf-8')
+    # Eligible jobs on collected-only platforms are for the user to apply to.
+    (data/'external/manual-queue.json').write_text(json.dumps(manual,ensure_ascii=False,indent=2),encoding='utf-8')
     return kept
 
 

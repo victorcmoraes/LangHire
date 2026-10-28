@@ -31,6 +31,13 @@ def job_key(url):
     match=re.fullmatch(r'/([\w-]+)/jobs/(\d+)(?:/confirmation)?/?',parsed.path)
     if host in ('boards.greenhouse.io','job-boards.greenhouse.io') and match:
         return 'greenhouse:'+match[1]+':'+match[2]
+    # Posting and application URLs differ by suffix; both name the same job.
+    match=re.fullmatch(r'/([\w.-]+)/([0-9a-f-]{36})(?:/application)?/?',parsed.path,re.I)
+    if host=='jobs.ashbyhq.com' and match:return 'ashby:'+match[1].lower()+':'+match[2].lower()
+    match=re.fullmatch(r'(?:/[\w-]+)?/j/(\w+)(?:/apply)?/?',parsed.path)
+    if host=='apply.workable.com' and match:return 'workable:'+match[1].upper()
+    match=re.fullmatch(r'/([\w-]+)/(\d+)(?:-[\w-]*)?/?',parsed.path)
+    if host=='jobs.smartrecruiters.com' and match:return 'smartrecruiters:'+match[1].lower()+':'+match[2]
     return host+parsed.path.rstrip('/').removesuffix('/apply').rstrip('/')
 
 
