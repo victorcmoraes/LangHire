@@ -7,7 +7,7 @@ import types
 import uuid
 
 from .application_safety import now
-from .easy_answers import digest,valid_value,proposal_fact_sources
+from .easy_answers import digest,valid_value,proposal_fact_sources,demographic_question
 
 
 def code_identity(code):
@@ -44,7 +44,7 @@ async def resolve_answer(book,field,job,metrics=None):
         return dict(answer,proposal_state='proposed',approval_required=True)
     fingerprint=digest({'field':row['field'],'context':row['context'],'facts':book.version,
         'repositories':digest(book.project_evidence),'model':ollama,
-        'implementation':digest([code_identity(type(book).propose.__code__),code_identity(valid_value.__code__),code_identity(proposal_fact_sources.__code__)])})
+        'implementation':digest([code_identity(type(book).propose.__code__),code_identity(valid_value.__code__),code_identity(proposal_fact_sources.__code__),code_identity(demographic_question.__code__)])})
     run_id=job.get('_answer_run_id') or 'process:'+str(os.getpid())
     claim=uuid.uuid4().hex;instant=time.time()
     with book.store.db() as db:

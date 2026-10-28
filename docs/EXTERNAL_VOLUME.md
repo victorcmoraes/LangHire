@@ -57,15 +57,15 @@ here)” in an employer's interview-process description is not a receipt.
 The first real Greenhouse attempt reached this email-verification precondition
 before support was added, so it remains uncertain and protected. The new
 continuation is fixture-tested, not yet validated with a real confirmation.
-Two external applications have since been independently confirmed on Greenhouse,
+The initial two external applications were independently confirmed on Greenhouse,
 in two companies, with accepted HTTP responses, saved own-job confirmation routes
 and received application emails. Both initially produced false negatives in the
 monitor: an unavailable response body was conflated with rejection, and one
 receipt used an unrecognized "Thank you for your application" template. The
 classifier now distinguishes unavailable bodies from explicit parsed rejection;
 it still requires the matching portal receipt. An HTTP 200 alone is insufficient.
-Three distinct hosted forms have been filled and reviewed, including Portuguese
-and English questions. The three-confirmation external milestone remains incomplete.
+Hosted forms have been filled and reviewed in Portuguese and English. The local
+run reports record the current confirmation counts and pilot progress.
 
 For already-final uncertain records, `reconcile-receipt` requires retained portal
 JSON, its screenshot, a mailbox receipt and a successful submit response. It
@@ -80,11 +80,9 @@ attempt's evidence directory):
 Preflight inspects up to three public schemas concurrently without opening Chrome.
 Browser applications remain sequential. A fresh ready result prioritizes a job in
 the queue; execution always checks its current schema and live form again. The
-latest bounded scan checked nine jobs: two ready for browser preparation, six
-pending and one changed job identity. Those are preparation counts, not sends.
-All answers in this scan came from rules or approved cache, without model calls.
-An additional otherwise-fillable job is held because a required working schedule
-has not been confirmed. Technical experience does not establish availability.
+preflight report distinguishes readiness from actual sends. A changed job identity
+requires fresh qualification. A required working schedule needs its own confirmed
+fact; technical experience does not establish availability.
 
 Automatic local Qwen3 8b proposals and local Gmail OAuth are now available; setup,
 first-answer approval and live-session email continuation are described in
@@ -106,8 +104,26 @@ exported job identities. It does not turn an uncertain attempt into a CSV succes
 Verification diagnosis holds affect only their platform's sends. A pending
 candidate-email clarification blocks additional sends without blocking public
 collection and preflight. No job is reconstructed or resent merely to reopen a
-lost challenge. The shared daily pilot ceiling is ten; the larger pilot and the
-200/day release gate remain incomplete.
+lost challenge. New installations default to a shared daily ceiling of ten.
+
+The daily ceiling can be explicitly disabled in the private `settings.json`:
+
+```json
+{"submission_policy":{"daily_limit":null}}
+```
+
+Without this setting, the default remains ten. A positive integer sets a shared
+daily ceiling; `null` removes it across browser workers, restarts and email-code
+continuations. Attempts remain counted and all duplicate/uncertain-send guards
+stay active. `status` exposes `daily_limit_enabled` and uses null remaining budget
+for unlimited operation. The CLI processes the complete eligible queue unless
+`run --limit N` explicitly bounds that invocation. Removing a ceiling does not
+claim completion of the qualification benchmark or platform pilot.
+
+The observed hosted confirmation templates include English and Portuguese.
+Receipt reconciliation accepts evidence obtained through the connected Gmail
+plugin or the locally authorized read-only Gmail API; both still require the
+same-job portal receipt, screenshot and accepted response before confirmation.
 
 Per-run reports in ignored `.local/reports/` distinguish preflight, actual
 browser attempts, submit intentions, confirmations, unknown answers, unsupported

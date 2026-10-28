@@ -52,9 +52,14 @@ def salary_question(question):
     return bool(re.search(r'salary|salari|remunera|pretensao|renda|taxa hora', normalized(question)))
 
 
+def demographic_question(question):
+    return bool(re.search(r'\brace\b|\braca\b|ethnicity|\betnia\b|\bgender\b|\bgenero\b|\blgbtqia\b|\blgbt\b|orientacao sexual|sexual orientation|\bdeficiencia\b|\bdisability\b|\bneurodiversidade\b',normalized(question)))
+
+
 def proposal_fact_sources(question, context, sources):
     """Constrain factual proposals to evidence for the actual requested fact."""
     q = normalized(question)
+    if demographic_question(question):return {}
     if re.search(r'variable compensation|bonus|commissions|stock options|\brsus\b|remuneracao variavel', q):
         return {k:v for k,v in sources.items() if k.startswith(('salary.variable', 'compensation.variable'))}
     if salary_question(question):
@@ -176,11 +181,16 @@ class AnswerBook:
         q = normalized(question)
         # Country comes from qualification, never from a mention inside a description.
         context = {'country': job.get('eligibility_country', ''), 'language': job.get('form_language', 'unknown'),
-                'company': job.get('company', '') if re.search(r'family|relative|worked.*(?:here|company)|employ(?:ed|ee|ment)|contracted|subsidiar|conflict|consent|privacy|acknowledg|familiar|parentesco|empresa|company|sponsor', q) else '',
+                'company': job.get('company', '') if re.search(r'family|relative|worked.*(?:here|company)|employ(?:ed|ee|ment)|contracted|subsidiar|conflict|consent|privacy|acknowledg|familiar|parentesco|empresa|cliente|parceir|partner|company|sponsor', q) else '',
                 'currency': job.get('salary_currency', ''), 'period': job.get('salary_period', '')}
         if re.search(r'\b(?:voce|qual|quais|possui|sua|seu|nacionalidade|raca|genero|orientacao)\b',q):context['language']='pt'
         if re.search(r'why.{0,60}(?:this role|this position|our team)|interest.{0,40}(?:role|position)|por que.{0,60}(?:vaga|equipe)',q):
             context['company']=job.get('company','');context['role']=job.get('title','')
+        if (re.search(r'how did you hear|como (?:soube|ficou sabendo|conheceu)|if it is from an event|if you clicked other',q)
+                and job.get('collection_origin')=='bounded_public_greenhouse_board'):
+            from urllib.parse import urlsplit
+            if urlsplit(job['url']).hostname in ('job-boards.greenhouse.io','boards.greenhouse.io'):
+                context.update(discovery_source='public_greenhouse_board',discovery_url=job['url'])
         for currency,pattern in [('BRL',r'R\$|\bBRL\b|\breais\b'),('USD',r'US\$|\bUSD\b'),('EUR',r'€|\bEUR\b')]:
             if re.search(pattern,question,re.I):context['currency']=currency
         for period,pattern in [('monthly',r'\bmonthly\b|\bmensal\b|por mes'),('annual',r'\bannual\w*\b|\banual\b|por ano'),('hourly',r'\bhourly\b|por hora')]:
@@ -192,6 +202,19 @@ class AnswerBook:
 
     def direct(self, field, context):
         q = normalized(field['label'])
+        if demographic_question(field['label']) and field.get('category')!='demographic':
+            declines=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in (
+                'prefiro nao informar','prefiro nao responder','nao quero responder','nao desejo informar',
+                'i prefer not to answer','i don t wish to answer','decline to self identify','prefer not to say')]
+            if len(declines)==1:return {'value':declines if field['type']=='checkbox-group' else declines[0],'refs':[],'source':'rule'}
+            return None
+        if context.get('discovery_source')=='public_greenhouse_board':
+            if field.get('options'):
+                choices=[o['value'] for o in field['options'] if re.search(r'trabalhe conosco|careers? (?:page|website)|company website',normalized(o['text']))]
+                if not choices:choices=[o['value'] for o in field['options'] if normalized(o['text']) in ('other','outros','outro')]
+                if len(choices)==1:return {'value':choices[0],'refs':['discovery.public_greenhouse_board'],'source':'rule'}
+            elif field['type'] in ('text','textarea'):
+                return {'value':'Greenhouse — página de carreiras' if context.get('language')=='pt' else 'Greenhouse careers page','refs':['discovery.public_greenhouse_board'],'source':'rule'}
         if field.get('category')=='application-processing-consent':
             if field['type']=='checkbox' and field.get('current_application_only') is True:
                 return {'value':True,'refs':[],'source':'rule'}
@@ -258,18 +281,21 @@ class AnswerBook:
         years=self.facts.get('experience.years')
         if years and q=='how many years of experience do you have working with python' and 'Python' in self.facts.get('skills',{}).get('value',[]):
             return {'value':years['value'],'refs':['experience.years','skills'],'source':'rule'}
-        if re.fullmatch(r'(?:english level|what is your english (?:proficiency )?level|what s your english proficiency level|nivel de ingles|qual e o seu nivel de ingles)',q) and 'level.english' in self.facts:
-            level=normalized(str(self.facts['level.english']['value']))
+        language_ref=None
+        if re.fullmatch(r'(?:english level|what is your english (?:proficiency )?level|what s your english proficiency level|nivel de ingles|qual (?:e )?o seu nivel de ingles)',q):language_ref='level.english'
+        elif re.fullmatch(r'(?:spanish level|what is your spanish (?:proficiency )?level|nivel de espanhol|qual (?:e )?o seu nivel de espanhol)',q):language_ref='level.spanish'
+        if language_ref in self.facts:
+            level=normalized(str(self.facts[language_ref]['value']))
             aliases={'proficient':('proficient','full professional proficiency','fluent'),
                      'advanced':('advanced','avancado'),
                      'intermediate':('intermediate','intermediario'),
                      'basic':('basic','basico')}
             for label in aliases.get(level,(level,)):
                 choices=[o['value'] for o in field.get('options',[]) if normalized(o['text'])==label]
-                if len(choices)==1:return {'value':choices[0],'refs':['level.english'],'source':'rule'}
+                if len(choices)==1:return {'value':choices[0],'refs':[language_ref],'source':'rule'}
             if level in ('proficient','advanced'):
                 choices=[o['value'] for o in field.get('options',[]) if re.match(r'^(?:advanced|avancado)\b',normalized(o['text']))]
-                if len(choices)==1:return {'value':choices[0],'refs':['level.english'],'source':'rule'}
+                if len(choices)==1:return {'value':choices[0],'refs':[language_ref],'source':'rule'}
         if field.get('type')=='checkbox' and re.match(r'^(siga a empresa|follow (?:the )?company)\b',q):
             # Applying does not authorize opting into unrelated company updates.
             return {'value':False,'refs':[],'source':'rule'}

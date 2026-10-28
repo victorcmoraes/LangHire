@@ -149,7 +149,7 @@ class AttemptStore:
             raise SafetyError('No explicit same-job portal receipt')
         if files[1].read_bytes()[:8]!=b'\x89PNG\r\n\x1a\n':raise SafetyError('Receipt screenshot missing')
         mail=json.loads(files[2].read_text(encoding='utf-8'))
-        if (mail.get('source')!='gmail_plugin' or mail.get('kind')!='application_received'
+        if (mail.get('source') not in ('gmail_plugin','gmail_local_api') or mail.get('kind')!='application_received'
                 or not mail.get('message_id') or not mail.get('sender') or not mail.get('recipient')):
             raise SafetyError('Mailbox receipt evidence missing')
         try:received=datetime.fromisoformat(mail['received_at'])
@@ -210,7 +210,19 @@ class AttemptStore:
         with self.db() as db:
             return [dict(r) for r in db.execute("SELECT * FROM submissions WHERE attempt_id=?", (attempt_id,))]
 
+    def daily_limit(self, fallback=10):
+        path=self.directory/'settings.json'
+        try:
+            settings=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+            limit=settings.get('submission_policy',{}).get('daily_limit',fallback)
+        except (OSError,ValueError,TypeError,AttributeError):
+            raise SafetyError('Invalid submission policy; no send permitted') from None
+        if limit is not None and (type(limit) is not int or limit<1):
+            raise SafetyError('Daily limit must be a positive integer or null for unlimited')
+        return limit
+
     def intent(self, attempt_id, request_key, url, daily_limit=10, at=None):
+        daily_limit=self.daily_limit(daily_limit)
         instant = at or datetime.now(timezone.utc)
         day = instant.astimezone(ZoneInfo("America/Fortaleza")).date().isoformat()
         with self.db() as db:
@@ -223,7 +235,7 @@ class AttemptStore:
             if db.execute("SELECT 1 FROM submissions WHERE attempt_id=?", (attempt_id,)).fetchone():
                 raise SafetyError("A send was already attempted; reconcile instead of resending")
             count = db.execute("SELECT COUNT(*) FROM submissions WHERE local_day=?", (day,)).fetchone()[0]
-            if count >= min(max(daily_limit, 1), 200):
+            if daily_limit is not None and count >= daily_limit:
                 raise SafetyError("Daily submission limit reached")
             db.execute("INSERT INTO submissions(attempt_id,request_key,at,local_day,url) VALUES(?,?,?,?,?)",
                        (attempt_id, request_key, instant.isoformat(), day, url))

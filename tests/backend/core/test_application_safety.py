@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -6,7 +7,8 @@ from core.application_safety import AttemptStore, SafetyError
 
 
 @pytest.mark.parametrize('mode',['valid','wrong_job','missing_screenshot','missing_mail','explicit_rejection','late_mail','no_http'])
-def test_saved_receipt_reconciliation_never_resends_or_erases_history(tmp_path,mode):
+@pytest.mark.parametrize('receipt_source',['gmail_plugin','gmail_local_api'])
+def test_saved_receipt_reconciliation_never_resends_or_erases_history(tmp_path,mode,receipt_source):
     import json
     from datetime import timedelta
     store=AttemptStore(tmp_path);url='https://job-boards.greenhouse.io/fixture/jobs/123';aid=store.begin(url)
@@ -18,7 +20,7 @@ def test_saved_receipt_reconciliation_never_resends_or_erases_history(tmp_path,m
     (directory/'capture.json').write_text(json.dumps([{'url':url.replace('123','456')+'/confirmation' if mode=='wrong_job' else url+'/confirmation',
         'text':'Thank you for applying. Your application has been received.'}]))
     if mode!='missing_screenshot':(directory/'capture.png').write_bytes(b'\x89PNG\r\n\x1a\nfixture')
-    mail={'source':'gmail_plugin','kind':'application_received','message_id':'fixture','sender':'ats@example.invalid',
+    mail={'source':receipt_source,'kind':'application_received','message_id':'fixture','sender':'ats@example.invalid',
           'recipient':'candidate@example.invalid','received_at':(datetime.now(timezone.utc)+timedelta(hours=2 if mode=='late_mail' else 0)).isoformat()}
     if mode!='missing_mail':(directory/'mail.json').write_text(json.dumps(mail))
     if mode=='valid':
@@ -118,6 +120,29 @@ def test_limit_shared_between_restarts_and_fortaleza_midnight(tmp_path):
     store.intent(two, "two", "https://jobs.lever.co/acme/two/apply", 1, after)
     assert store.submissions(one)[0]["local_day"] == "2026-10-26"
     assert store.submissions(two)[0]["local_day"] == "2026-10-27"
+
+
+def test_unlimited_policy_survives_restart_and_preserves_history_and_duplicate_guard(tmp_path):
+    (tmp_path/'settings.json').write_text(json.dumps({'submission_policy':{'daily_limit':None}}))
+    store=AttemptStore(tmp_path)
+    for i in range(205):
+        aid=store.begin('https://job-boards.greenhouse.io/fixture/jobs/'+str(i))
+        AttemptStore(tmp_path).intent(aid,'send-'+str(i),'https://boards.greenhouse.io/fixture/jobs/'+str(i),daily_limit=1)
+        store.transition(aid,'uncertain','No receipt; never retry')
+    assert store.daily_limit() is None
+    with store.db() as db:assert db.execute('SELECT COUNT(*) FROM submissions').fetchone()[0]==205
+    with pytest.raises(SafetyError):store.begin('https://job-boards.greenhouse.io/fixture/jobs/0')
+    aid=store.begin('https://job-boards.greenhouse.io/fixture/jobs/206')
+    store.intent(aid,'one','https://boards.greenhouse.io/fixture/jobs/206')
+    with pytest.raises(SafetyError,match='already attempted'):store.intent(aid,'two','https://boards.greenhouse.io/fixture/jobs/206')
+
+
+@pytest.mark.parametrize('limit',[0,-1,True,'unlimited'])
+def test_invalid_daily_policy_fails_closed(tmp_path,limit):
+    (tmp_path/'settings.json').write_text(json.dumps({'submission_policy':{'daily_limit':limit}}))
+    store=AttemptStore(tmp_path);aid=store.begin('https://example.invalid/job')
+    with pytest.raises(SafetyError):store.intent(aid,'send','https://example.invalid/job')
+    assert not store.submissions(aid)
 
 
 def test_hold_ack_never_allows_a_second_submission(tmp_path):

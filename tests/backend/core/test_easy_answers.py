@@ -263,6 +263,48 @@ def test_sms_consent_and_affiliation_evidence_stay_bound_to_the_confirmed_compan
     assert proposal_fact_sources('Have you ever been an employee?',{'company':''},sources)=={}
 
 
+@pytest.mark.parametrize('label,ref,level',[
+    ('Qual o seu nível de inglês?','level.english','Proficient'),
+    ('Qual o seu nível de espanhol?','level.spanish','Advanced'),
+])
+def test_portuguese_language_labels_reuse_confirmed_level_without_inference(tmp_path,label,ref,level):
+    book(tmp_path);path=tmp_path/'confirmed_facts.json';data=json.loads(path.read_text())
+    data['facts'].append({'id':ref,'value':level,'source':'user'})
+    path.write_text(json.dumps(data))
+    field={'label':label,'type':'select-one','options':[{'text':'Avançado (consigo conversar profissionalmente)','value':'advanced'},{'text':'Nativo','value':'native'}]}
+    answer=AnswerBook(tmp_path).resolve(field,{'url':'job','eligibility_country':'BR'})
+    assert answer=={'value':'advanced','refs':[ref],'source':'rule'}
+
+
+def test_company_relationship_and_discovery_use_actual_job_context(tmp_path):
+    b=book(tmp_path);job={'url':'https://job-boards.greenhouse.io/example/jobs/123','company':'Example','collection_origin':'bounded_public_greenhouse_board'}
+    assert b.context('Você trabalha em um cliente ou parceiro?',job)['company']=='Example'
+    q={'label':'Como ficou sabendo deste processo seletivo?','type':'select-one','options':[{'text':'Linkedin','value':'li'},{'text':'Site da Example - Trabalhe Conosco','value':'careers'},{'text':'Outros','value':'other'}]}
+    assert b.resolve(q,job)['value']=='careers'
+    assert 'pending' in b.resolve(q,dict(job,collection_origin='unknown'))
+    assert 'pending' in b.resolve(q,dict(job,url='https://example.invalid/jobs/123'))
+    q['options']=q['options'][::2]
+    assert b.resolve(q,job)['value']=='other'
+    detail={'label':'If it is from an EVENT or you clicked OTHER, please specify:','type':'text','options':[]}
+    assert b.resolve(detail,job)['value']=='Greenhouse careers page'
+
+
+@pytest.mark.parametrize('label',[
+    'Sinalize com qual raça/cor você se identifica',
+    'Sinalize com qual identidade de gênero você se identifica',
+    'Sinalize se você se identifica parte da comunidade LGBTQIA+',
+    'Você possui algum tipo de deficiência?',
+])
+async def test_custom_demographic_questions_decline_disclosure_and_never_call_model(tmp_path,monkeypatch,label):
+    b=book(tmp_path);job={'url':'job','eligibility_country':'BR'}
+    q={'label':label,'type':'select-one','options':[{'text':'Sim','value':'yes'},{'text':'Prefiro não informar','value':'decline'}]}
+    assert b.resolve(q,job)=={'value':'decline','refs':[],'source':'rule'}
+    q['options']=q['options'][:1];aid=b.resolve(q,job)['pending']
+    def forbidden(*a,**kw):raise AssertionError('Do not infer demographic attributes')
+    monkeypatch.setattr('urllib.request.urlopen',forbidden)
+    assert (await b.propose(aid,{}))['reason']=='missing_facts'
+
+
 def test_salary_units_can_be_confirmed_on_pending_question_without_cross_job_leak(tmp_path):
     b=book(tmp_path);q=field('Salary');j={'url':'job','eligibility_country':'BR'}
     aid=b.resolve(q,j)['pending']

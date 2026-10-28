@@ -294,7 +294,7 @@ class GreenhouseAdapter:
         from .gmail_mailbox import GmailMailbox,MailError,expected_email,wait_for_code
         from .external_service import remaining_budget
         if not GmailMailbox(self.data).status()['authorized']:return False
-        if not remaining_budget(self.book.store):
+        if remaining_budget(self.book.store)==0:
             self.book.store.event(self.attempt,'gmail_verification_unavailable',{'reason':'daily_limit'})
             return False
         try:

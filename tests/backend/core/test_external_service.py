@@ -6,6 +6,16 @@ from core.external_service import run_external,remaining_budget
 from core.easy_answers import AnswerBook
 
 
+def test_unlimited_budget_is_explicit_null_and_keeps_daily_counts(tmp_path):
+    (tmp_path/'settings.json').write_text(json.dumps({'submission_policy':{'daily_limit':None}}))
+    store=AttemptStore(tmp_path)
+    for i in range(12):
+        aid=store.begin('https://example.invalid/jobs/'+str(i));store.intent(aid,str(i),'https://example.invalid/jobs/'+str(i))
+    assert remaining_budget(AttemptStore(tmp_path)) is None
+    (tmp_path/'settings.json').write_text(json.dumps({'submission_policy':{'daily_limit':15}}))
+    assert remaining_budget(AttemptStore(tmp_path))==3
+
+
 def test_ready_preflight_prioritizes_a_fillable_job_without_bypassing_live_checks(tmp_path):
     from core.external_service import queue
     from core.application_safety import now

@@ -9,9 +9,12 @@ from core.application_safety import AttemptStore
 from core.submission_monitor import SubmissionMonitor, is_submission, clean_url, same_lever_redirect, confirmation_matches_job
 
 
-def test_hosted_confirmation_template_requires_its_own_job_receipt_route():
+@pytest.mark.parametrize('text',[
+    "Thank you for your application! We're thrilled to know you're considering being part of our team!",
+    'Agradecemos sua inscrição! Ficamos muito felizes em saber que você considera fazer parte do nosso time!',
+])
+def test_hosted_confirmation_template_requires_its_own_job_receipt_route(text):
     from core.submission_monitor import SUCCESS
-    text="Thank you for your application! We're thrilled to know you're considering being part of our team!"
     job='https://job-boards.greenhouse.io/fixture/jobs/123'
     assert SUCCESS.search(text)
     assert confirmation_matches_job(job,job+'/confirmation')

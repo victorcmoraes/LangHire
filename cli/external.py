@@ -23,7 +23,7 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     for name in ('status','collect','triage','stop'):sub.add_parser(name)
     run=sub.add_parser('run');run.add_argument('--execution',choices=('review','submit'),default='review')
-    run.add_argument('--limit',type=int,default=10);run.add_argument('--platform',choices=('lever','greenhouse'))
+    run.add_argument('--limit',type=int,help='Maximum jobs this run; defaults to the complete eligible queue');run.add_argument('--platform',choices=('lever','greenhouse'))
     run.add_argument('--job-url')
     preflight=sub.add_parser('preflight');preflight.add_argument('--limit',type=int,default=50)
     export=sub.add_parser('export');export.add_argument('--tracker',type=Path)
@@ -84,7 +84,8 @@ def main():
     if args.command=='triage':
         result=triage(data);print(json.dumps({k:v for k,v in result.items() if k!='decisions'},ensure_ascii=False,indent=2));return
     if args.command=='status':
-        result={'daily_remaining':remaining_budget(store),'attempt_states':dict(Counter(a['state'] for a in store.list()))}
+        result={'daily_limit':store.daily_limit(),'daily_limit_enabled':store.daily_limit() is not None,
+                'daily_remaining':remaining_budget(store),'attempt_states':dict(Counter(a['state'] for a in store.list()))}
         with store.db() as db:
             confirmed=db.execute("SELECT a.job_url,EXISTS(SELECT 1 FROM events e WHERE e.attempt_id=a.id AND e.kind='legacy_import') AS historical FROM attempts a WHERE a.state='confirmed'").fetchall()
         result['confirmed_new']=sum(not r['historical'] for r in confirmed)
@@ -95,7 +96,7 @@ def main():
         if (data/'external/triage.json').exists():result['triage']=json.loads((data/'external/triage.json').read_text(encoding='utf-8'))['states']
         result['platform_holds']={p.name:json.loads(p.read_text(encoding='utf-8')).get('reason') for p in (data/'external').glob('*-verification-hold.json') if json.loads(p.read_text(encoding='utf-8')).get('active')}
         print(json.dumps(result,ensure_ascii=False,indent=2));return
-    if args.limit<1:parser.error('--limit must be positive')
+    if args.limit is not None and args.limit<1:parser.error('--limit must be positive')
     triage(data)
     body=SimpleNamespace(execution=args.execution,limit=args.limit,platform=args.platform,job_url=args.job_url,job_urls=None)
     status={};asyncio.run(run_external(data,body,status));print(json.dumps(status,ensure_ascii=False,indent=2))

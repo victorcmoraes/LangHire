@@ -23,9 +23,11 @@ def core_title(title):
 
 
 def remaining_budget(store):
+    limit=store.daily_limit()
+    if limit is None:return None
     day=datetime.now(ZoneInfo('America/Fortaleza')).date().isoformat()
     with store.db() as db:count=db.execute('SELECT COUNT(*) FROM submissions WHERE local_day=?',(day,)).fetchone()[0]
-    return max(0,10-count)
+    return max(0,limit-count)
 
 
 def queue(data):
@@ -47,7 +49,8 @@ def queue(data):
         if job_key(job['url']) in protected or title in protected_titles or duplicate in seen:
             isolated.append({'url':job['url'],'reason':'protected_or_possible_duplicate','title':job['title']});continue
         seen.add(duplicate)
-        kept.append(dict(job,external_qualification=decision))
+        kept.append(dict(job,external_qualification=decision,
+                         collection_origin=known.get(job_key(job['url']),{}).get('collection_origin',job.get('collection_origin'))))
     # Cached readiness changes priority only; execution checks a fresh schema
     # and the live form before allowing a send intention.
     facts_version=AnswerBook(data).version
@@ -115,7 +118,7 @@ async def run_external(data,body,status):
                 if body.execution=='submit' and platform_hold(data,job['platform']):
                     status.setdefault('paused_channels',{})[job['platform']]='verification_diagnosis'
                     continue
-                if body.execution=='submit' and not remaining_budget(store):status['stop_reason']='daily_limit';break
+                if body.execution=='submit' and remaining_budget(store)==0:status['stop_reason']='daily_limit';break
                 qualification=job['external_qualification'];book=AnswerBook(data)
                 if qualification['facts_version']!=book.reference_version(qualification['fact_refs']):continue
                 if job['platform']=='greenhouse':

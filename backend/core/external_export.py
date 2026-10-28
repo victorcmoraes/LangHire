@@ -38,7 +38,9 @@ def export_confirmed(data, tracker):
             key=job_key(attempt['job_url'])
             if key in known:continue
             job=jobs[key];directory=Path(attempt['evidence_dir'])
-            review=json.loads((directory/'external-review.json').read_text(encoding='utf-8')) if (directory/'external-review.json').exists() else {}
+            review_path=directory/'external-review.json'
+            if not review_path.exists():review_path=directory/'parent-external-review.json'
+            review=json.loads(review_path.read_text(encoding='utf-8')) if review_path.exists() else {}
             resume=next((a.get('value','') for a in review.get('snapshot',{}).get('answers',[]) if a.get('sha256')), '')
             day=datetime.fromisoformat(attempt['created_at']).astimezone(ZoneInfo('America/Fortaleza')).date().isoformat()
             writer.writerow({'data':day,'empresa':job['company'],'cargo':job['title'],
