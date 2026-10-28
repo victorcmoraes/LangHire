@@ -18,7 +18,9 @@ export default defineConfig(async () => ({
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ["**/backend/**", "**/.local/**"],
+      // Rust has its own watcher. Watching its Windows DLLs can crash Vite
+      // with EBUSY while cargo links the desktop application.
+      ignored: ["**/src-tauri/**", "**/backend/**", "**/.local/**", "**/.venv/**", "**/build/**"],
     },
   },
   test: {

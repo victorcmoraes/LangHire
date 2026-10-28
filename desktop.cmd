@@ -5,6 +5,8 @@ set "LANGHIRE_DATA_DIR=%~dp0.local"
 set "ANONYMIZED_TELEMETRY=false"
 set "PYTHONUTF8=1"
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-desktop.ps1
+if errorlevel 1 exit /b %ERRORLEVEL%
 if /i "%~1"=="build" goto build
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-backend.ps1
 if errorlevel 1 exit /b %ERRORLEVEL%

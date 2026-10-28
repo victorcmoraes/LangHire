@@ -56,6 +56,8 @@ uv run --frozen python -m PyInstaller `
   --collect-all playwright `
   backend/main.py
 
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
+
 $BinaryPath = "src-tauri/binaries/langhire-backend-" + $Target + ".exe"
 Write-Host "Backend binary built: $BinaryPath"
 Get-Item $BinaryPath | Select-Object Name, Length
