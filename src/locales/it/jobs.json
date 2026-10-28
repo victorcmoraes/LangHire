@@ -1,0 +1,76 @@
+{
+  "title": "Offerte",
+  "subtitle": "{{total}} offerte raccolte · {{applied}} candidature inviate · {{pending}} in attesa",
+  "hideCollector": "Nascondi raccolta",
+  "collectJobs": "Raccogli offerte",
+  "status": {
+    "pending": "In attesa",
+    "applied": "Candidatura inviata",
+    "failed": "Non riuscita",
+    "blocked": "Bloccata",
+    "inProgress": "In corso"
+  },
+  "filter": {
+    "all": "Tutte"
+  },
+  "search": "Cerca",
+  "searchPlaceholder": "Cerca per titolo o azienda...",
+  "collector": {
+    "title": "Raccolta offerte",
+    "description": "Cerca annunci in linea con il tuo profilo. Seleziona una piattaforma, inserisci un titolo e avvia la raccolta. Di solito servono 3-10 minuti per titolo, mentre l'agente scorre i risultati.",
+    "loginInfo": "<strong>Accesso:</strong> si aprirà un browser per verificare se hai effettuato l'accesso alla piattaforma selezionata. In caso contrario, l'agente attenderà che tu acceda manualmente, poi proseguirà da solo.",
+    "sourcePlatform": "Piattaforma di origine",
+    "jobTitlePlaceholder": "Titolo (es. 'Data Analyst') o lascia vuoto per tutti",
+    "maxJobsPlaceholder": "Max offerte",
+    "maxJobsTitle": "Numero massimo di offerte da raccogliere (per titolo)",
+    "stop": "Ferma",
+    "start": "Avvia",
+    "startingCollection": "Avvio della raccolta...",
+    "collectedProgress": "Raccolte {{collected}} di {{max}} offerte",
+    "collectionLog": "Registro della raccolta"
+  },
+  "emptyState": {
+    "noMatching": "Nessuna offerta corrispondente",
+    "noJobsYet": "Nessuna offerta raccolta",
+    "tryChanging": "Prova a modificare la ricerca o il filtro.",
+    "clickCollect": "Fai clic su 'Raccogli offerte' qui sopra per cercare annunci corrispondenti su LinkedIn.",
+    "startCollecting": "Avvia la raccolta"
+  },
+  "jobItem": {
+    "untitled": "Senza titolo",
+    "easyApply": "Easy Apply",
+    "unknown": "Sconosciuta",
+    "error": "Errore: {{error}}",
+    "collected": "Raccolta il {{date}}",
+    "applied": " · Candidatura il {{date}}",
+    "coverLetter": "Lettera di presentazione",
+    "coverLetterTitle": "Genera una lettera di presentazione su misura per questa offerta",
+    "applyRunningTitle": "Una candidatura è già in corso",
+    "retryTitle": "Riprova questa offerta",
+    "applyTitle": "Candidati a questa offerta",
+    "applying": "Invio in corso...",
+    "retry": "Riprova",
+    "apply": "Candidati",
+    "openOnLinkedIn": "Apri su LinkedIn"
+  },
+  "showingJobs": "{{count}} offerta visualizzata",
+  "showingJobs_plural": "{{count}} offerte visualizzate",
+  "dialog": {
+    "startApplying": "Avvia le candidature",
+    "startCollecting": "Avvia la raccolta"
+  },
+  "coverLetterModal": {
+    "title": "Genera lettera di presentazione",
+    "jobAt": "{{title}} presso {{company}}",
+    "noDescription": "Nessuna descrizione disponibile. Incolla la descrizione qui sotto per generare una lettera di presentazione.",
+    "pastePlaceholder": "Incolla qui la descrizione dell'offerta...",
+    "generate": "Genera",
+    "generating": "Generazione della lettera...",
+    "generatedLabel": "Lettera generata",
+    "copy": "Copia",
+    "saved": "Salvata!",
+    "saveToProfile": "Salva nel profilo",
+    "failedGenerate": "Impossibile generare la lettera di presentazione",
+    "failedSave": "Impossibile salvare nel profilo"
+  }
+}
