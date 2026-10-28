@@ -88,6 +88,27 @@ async def test_human_hold_waits_for_explicit_ack_and_is_not_confirmation(tmp_pat
     assert store.submissions(attempt) == []
 
 
+@pytest.mark.parametrize('sent',[False,True])
+async def test_unattended_hold_expires_without_ack_or_second_send(tmp_path,sent):
+    (tmp_path/'settings.json').write_text(json.dumps({'submission_policy':{'daily_limit':None,'unattended_hold_seconds':1}}))
+    store=AttemptStore(tmp_path);url='https://job-boards.greenhouse.io/fixture/jobs/1';aid=store.begin(url)
+    if sent:store.intent(aid,'send',url)
+    with pytest.raises(SafetyError,match='expired'):await store.wait_for_human(aid,'captcha')
+    assert store.get(aid)['state']=='awaiting_human' and not store.get(aid)['acknowledged']
+    with store.db() as db:
+        assert db.execute("SELECT COUNT(*) FROM events WHERE attempt_id=? AND kind='human_hold_expired'",(aid,)).fetchone()[0]==1
+    assert len(store.submissions(aid))==int(sent)
+    with pytest.raises(SafetyError):store.begin(url)
+
+
+@pytest.mark.parametrize('limit',[0,-5,True,'1'])
+async def test_invalid_unattended_hold_fails_closed_before_holding(tmp_path,limit):
+    (tmp_path/'settings.json').write_text(json.dumps({'submission_policy':{'unattended_hold_seconds':limit}}))
+    store=AttemptStore(tmp_path);aid=store.begin('https://jobs.lever.co/acme/one')
+    with pytest.raises(SafetyError,match='positive integer'):await store.wait_for_human(aid,'captcha')
+    assert store.get(aid)['state']=='running'
+
+
 def test_recovery_preserves_confirmed_receipt_and_invalidates_live_challenge(tmp_path):
     store = AttemptStore(tmp_path)
     confirmed = store.begin("https://jobs.lever.co/acme/confirmed")

@@ -115,6 +115,18 @@ async def test_captcha_wait_then_same_attempt_result(fixture_portal, message, ex
     assert len(store.submissions(attempt)) == 1
 
 
+async def test_unattended_captcha_hold_expires_without_second_click(fixture_portal):
+    from core.application_safety import SafetyError
+    page,data,store,aid,monitor=fixture_portal
+    (store.directory/'settings.json').write_text(json.dumps({'submission_policy':{'unattended_hold_seconds':1}}))
+    data['challenge']=True
+    await click_submit(page,monitor)
+    with pytest.raises(SafetyError,match='expired'):await asyncio.wait_for(monitor.finalize(),10)
+    # execute_external finalizes the still-active hold; a send already exists.
+    assert store.get(aid)['state']=='awaiting_human' and store.get(aid)['acknowledged']==0
+    assert data['received']==1 and len(store.submissions(aid))==1
+
+
 @pytest.mark.parametrize('status,message,expected',[
     (400,'There was an error verifying your application. Please try again.','uncertain'),
     (200,'We have received your application','confirmed'),

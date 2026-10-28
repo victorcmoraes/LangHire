@@ -201,15 +201,33 @@ class AttemptStore:
                        (attempt_id,now(),'probe_reconciled',json.dumps({'message':message})))
 
     async def wait_for_human(self, attempt_id, message, cancel=None):
+        hold_limit=self.unattended_hold_seconds()
         self.transition(attempt_id, "awaiting_human", message)
         print(f"\nCAPTCHA / intervenção: {message}\nTentativa: {attempt_id}\n"
               f"Resolva na janela aberta, SEM clicar novamente em enviar. Depois execute:\n"
               f'& "{Path(__file__).resolve().parents[2] / "langhire.cmd"}" confirm {attempt_id}\n', flush=True)
+        deadline=asyncio.get_running_loop().time()+hold_limit if hold_limit else None
         while not self.get(attempt_id)["acknowledged"]:
             if cancel and cancel.get("cancel_requested"):
                 raise asyncio.CancelledError()
+            # Unattended runs end the hold instead of stalling the queue. The
+            # caller finalizes it: pending without a send, uncertain after one.
+            if deadline and asyncio.get_running_loop().time()>=deadline:
+                self.event(attempt_id,'human_hold_expired',{'seconds':hold_limit})
+                raise SafetyError('Human hold expired unattended; challenge left unsolved')
             await asyncio.sleep(0.5)
         self.transition(attempt_id, "running", "Human acknowledged; checking the SAME attempt")
+
+    def unattended_hold_seconds(self):
+        path=self.directory/'settings.json'
+        try:
+            settings=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {}
+            limit=settings.get('submission_policy',{}).get('unattended_hold_seconds')
+        except (OSError,ValueError,TypeError,AttributeError):
+            raise SafetyError('Invalid submission policy; no send permitted') from None
+        if limit is not None and (type(limit) is not int or limit<1):
+            raise SafetyError('Unattended hold must be a positive integer or null to wait for a human')
+        return limit
 
     def submissions(self, attempt_id):
         with self.db() as db:

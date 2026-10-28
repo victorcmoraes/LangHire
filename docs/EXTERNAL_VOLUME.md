@@ -113,6 +113,11 @@ The daily ceiling can be explicitly disabled in the private `settings.json`:
 {"submission_policy":{"daily_limit":null}}
 ```
 
+For unattended runs, `submission_policy.unattended_hold_seconds` (a positive
+integer) bounds each human hold. When it expires, the challenge stays unsolved:
+an attempt without a send returns to pending, one with a send stays uncertain
+and protected, and the queue continues. Without it, holds wait for a human.
+
 Without this setting, the default remains ten. A positive integer sets a shared
 daily ceiling; `null` removes it across browser workers, restarts and email-code
 continuations. Attempts remain counted and all duplicate/uncertain-send guards
