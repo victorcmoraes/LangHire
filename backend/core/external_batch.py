@@ -11,6 +11,7 @@ from filelock import FileLock
 from .application_safety import AttemptStore,SafetyError,job_key,now
 from .easy_answers import AnswerBook,equivalent_key,digest
 from .external_qualification import triage,qualify
+from .job_tracks import load_job_tracks
 from .external_service import queue,remaining_budget,update_projection
 from .external_apply import execute_external,platform_hold
 from .browser_runtime import persistent_browser
@@ -167,7 +168,7 @@ async def prepare_batch(store,bid,metrics,answer_run_id=None):
             store.item(bid,job['url'],'paused',{'reason':'platform_hold'});return
         if job['platform']!='greenhouse':store.item(bid,job['url'],'ready',{'reason':'hosted_inspection_required'});return
         async with semaphore:
-            decision=qualify(job,AnswerBook(store.data).facts)
+            decision=qualify(job,AnswerBook(store.data).facts,load_job_tracks(store.data))
             if decision['state']!='eligible':store.item(bid,job['url'],'pending',{'reason':'qualification_changed','qualification':decision});return
             try:
                 result=await preflight_greenhouse(store.data,job)
@@ -211,7 +212,7 @@ async def run_batch(data,bid,*,discovery=None):
                         if execution=='submit' and remaining_budget(store.attempts)==0:
                             store.state(bid,'daily_limit');break
                         job=dict(item['job'],_answer_run_id=run_id,_batch_id=bid);book=AnswerBook(store.data)
-                        decision=qualify(job,book.facts)
+                        decision=qualify(job,book.facts,load_job_tracks(store.data))
                         if decision['state']!='eligible':store.item(bid,job['url'],'pending',{'reason':'qualification_changed','qualification':decision});continue
                         decision['facts_version']=book.reference_version(decision['fact_refs']);job['external_qualification']=decision
                         if batch_hold(store.data,job['platform'],execution):store.item(bid,job['url'],'paused',{'reason':'platform_hold'});continue

@@ -6,9 +6,7 @@ import re
 from .application_safety import AttemptStore,job_key
 from .easy_answers import AnswerBook,normalized
 from .external_catalog import identity
-
-TRACK=re.compile(r'back.?end|software (?:engineer|developer)|desenvolv|developer|data engineer|engenheir.*dados|analytics engineer|(?:ai|ia|ml|tooling|integration|gtm) engineer|automa[ct]|integrac',re.I)
-EXCLUDED=re.compile(r'\b(?:staff|principal|manager|diretor|director|head|architect|arquiteto|master(?!\s+data)|lead|leader|qa|quality|tester|ios|android|mobile|abap)\b',re.I)
+from .job_tracks import load_job_tracks,matches_track
 
 
 def required_text(description):
@@ -26,15 +24,16 @@ def home_cities(facts):
     return [c for c in cities if isinstance(c,str) and c.strip()]
 
 
-def qualify(job,facts):
+def qualify(job,facts,tracks=None):
+    tracks=load_job_tracks() if tracks is None else tracks
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
         return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','location.state','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule','languages','level.english','level.spanish','level.german','level.french','level.italian','level.mandarin','level.japanese','level.dutch']}
-    if not TRACK.search(normalized(title)):return result('discarded','outside_tracks',[title])
-    if EXCLUDED.search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
-    if re.search(r'\breact native\b|\bflutter\b|\bswiftui\b',normalized(title)):
+    if not matches_track(title,tracks):return result('discarded','outside_tracks',[title])
+    if tracks['exclude'].search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
+    if not tracks['allow_mobile'] and re.search(r'\breact native\b|\bflutter\b|\bswiftui\b',normalized(title)):
         return result('discarded','mobile_outside_tracks',[title])
-    if re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
+    if not tracks['allow_pure_frontend'] and re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
         return result('discarded','pure_frontend_outside_tracks',[title])
     if re.search(r'exclusiv[ao]|applicants only|afirmativ[ao]|affirmative',normalized(title)):
         return result('pending','affirmative_eligibility_not_confirmed',[title])
@@ -121,7 +120,7 @@ def qualify(job,facts):
 
 
 def triage(data_dir):
-    data=Path(data_dir);book=AnswerBook(data);store=AttemptStore(data)
+    data=Path(data_dir);tracks=load_job_tracks(data);book=AnswerBook(data);store=AttemptStore(data)
     catalog=json.loads((data/'external/catalog.json').read_text(encoding='utf-8'))
     jobs=json.loads((data/'jobs.json').read_text(encoding='utf-8'))
     previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse')}
@@ -137,9 +136,9 @@ def triage(data_dir):
             board=boards.get(key[:2],{})
             if 'closed_imported' in board:decision={'state':'closed','reason':'not_in_current_complete_public_board','evidence':[],'fact_refs':[]}
             else:
-                decision=qualify(job,book.facts)
+                decision=qualify(job,book.facts,tracks)
                 if decision['state']=='eligible':decision.update(state='pending',reason='availability_not_confirmed')
-        else:decision=qualify(job,book.facts)
+        else:decision=qualify(job,book.facts,tracks)
         decision.update(platform=key[0],board=key[1],externalId=key[2],url=job['url'],title=job['title'],location=job.get('location',''),
                         facts_version=book.reference_version(decision['fact_refs']))
         output.append(decision)

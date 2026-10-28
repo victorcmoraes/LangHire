@@ -12,7 +12,8 @@ from filelock import FileLock
 
 from .application_safety import SafetyError,now,job_key
 from .external_catalog import refresh_board,identity,lever_job
-from .external_qualification import TRACK,home_cities,qualify,triage
+from .external_qualification import home_cities,qualify,triage
+from .job_tracks import load_job_tracks,matches_track
 from .easy_answers import AnswerBook
 
 
@@ -74,7 +75,7 @@ def discover(data,boards=(),max_new=5000,workers=3,aggregator_pages=5):
     data=Path(data);root=data/'external';root.mkdir(parents=True,exist_ok=True)
     from .shared_config import add_collected_job
     with FileLock(str(root/'catalog.lock'),timeout=0):
-        selected=load_boards(data,boards);book=AnswerBook(data)
+        selected=load_boards(data,boards);book=AnswerBook(data);tracks=load_job_tracks(data)
         path=root/'catalog.json'
         catalog=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'jobs':[],'boards':[]}
         previous={identity(j):j for j in catalog['jobs']};known_urls={job_key(j['url']) for j in catalog['jobs']}
@@ -99,7 +100,7 @@ def discover(data,boards=(),max_new=5000,workers=3,aggregator_pages=5):
             rows,scope=fetched[key];active={identity(j) for j in rows};retained=0;added=0
             for job in rows:
                 ident=identity(job);exists=ident in previous
-                relevant=bool(TRACK.search(job['title'])) and candidate_location(job,home_cities(book.facts))
+                relevant=matches_track(job['title'],tracks) and candidate_location(job,home_cities(book.facts))
                 if not exists and (not relevant or job_key(job['url']) in known_urls):continue
                 if not exists and new_identities>=max_new:truncated=True;continue
                 if not exists:
@@ -107,7 +108,7 @@ def discover(data,boards=(),max_new=5000,workers=3,aggregator_pages=5):
                     # Preserve the existing source label used for deterministic GH attribution.
                     if job['platform']=='greenhouse':job['collection_origin']='bounded_public_greenhouse_board'
                     if add_collected_job(dict(job,status='new'),data):
-                        decision=qualify(job,book.facts)
+                        decision=qualify(job,book.facts,tracks)
                         new.append({'url':job['url'],'title':job['title'],'state':decision['state'],'reason':decision['reason']})
                         added+=1
                     new_identities+=1

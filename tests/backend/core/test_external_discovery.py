@@ -80,3 +80,14 @@ def test_aggregator_pagination_is_bounded_brazil_only_and_deduplicated(monkeypat
     monkeypatch.setattr('urllib.request.urlopen',fetch)
     rows,scope=scoped_board('lever','jobgether',5)
     assert len(rows)==100 and calls==[0,100] and scope['pages_checked']==2
+
+
+def test_discovery_uses_same_configured_tracks_as_triage(tmp_path,monkeypatch):
+    seed(tmp_path,[])
+    row=dict(job('fixture',42),title='Platform Engineer')
+    monkeypatch.setattr('core.external_discovery.refresh_board',lambda *args:[row])
+    assert discover(tmp_path)['new_jobs']==0
+    (tmp_path/'settings.json').write_text(json.dumps({'job_tracks':{'include':'platform engineer'}}))
+    report=discover(tmp_path)
+    assert report['new_jobs']==1 and report['new_qualification']=={'eligible':1}
+    assert report['triage']=={'eligible':1}
