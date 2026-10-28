@@ -51,6 +51,8 @@ def canonical_ats(url):
         return 'https://'+host+p.path.rstrip('/').removesuffix('/apply')
     if host in ('job-boards.greenhouse.io','boards.greenhouse.io') and re.fullmatch(r'/[\w-]+/jobs/\d+/?',p.path):
         return 'https://job-boards.greenhouse.io'+p.path.rstrip('/')
+    if host=='jobs.ashbyhq.com' and re.fullmatch(r'/[\w-]+/[0-9a-f-]{36}(?:/application)?/?',p.path,re.I):
+        return 'https://'+host+p.path.rstrip('/').removesuffix('/application')
     raise SafetyError('Unsupported hosted ATS URL')
 
 
@@ -259,6 +261,7 @@ async def application_browser(data,existing=None):
 
 async def execute_external(job,data,resume,execution='review',status=None,lease_held=False,session=None):
     from contextlib import nullcontext
+    if job['platform'] not in ('lever','greenhouse'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
     data=Path(data);job=dict(job,url=canonical_ats(job['url']),eligibility_country='BR',form_language='en')
     contact=data/'pending-contact-verification.json'
     if execution=='submit' and contact.exists() and json.loads(contact.read_text(encoding='utf-8')).get('active'):
@@ -270,7 +273,6 @@ async def execute_external(job,data,resume,execution='review',status=None,lease_
         if job.get('_batch_id'):store.event(aid,'external_batch',{'batch_id':job['_batch_id'],'attempt_id':aid})
         if job.get('external_qualification'):store.event(aid,'external_qualification',job['external_qualification'])
         try:
-            if job['platform'] not in ('lever','greenhouse'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
             adapter_type=LeverAdapter
             if job['platform']=='greenhouse':
                 from .greenhouse_apply import GreenhouseAdapter
