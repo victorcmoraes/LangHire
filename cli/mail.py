@@ -1,4 +1,4 @@
-"""Local read-only Gmail connection. No model, sends or mailbox modifications."""
+"""Local read-only Gmail connection and first-round outcomes. No model, sends or mailbox modifications."""
 import argparse
 import json
 import os
@@ -15,6 +15,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
     sub.add_parser('status');sub.add_parser('check');sub.add_parser('setup')
     connect=sub.add_parser('connect');connect.add_argument('--client',type=Path)
+    outcomes=sub.add_parser('outcomes',help='Classify replies to sent applications and report who advanced')
+    outcomes.add_argument('--no-scan',action='store_true',help='Report from already classified messages only')
+    outcomes.add_argument('--max-messages',type=int,default=500)
+    outcomes.add_argument('--rescan',action='store_true',help='Reclassify every message after a rule change')
     args=parser.parse_args();mail=GmailMailbox(get_data_dir())
     try:
         if args.command=='setup':
@@ -23,6 +27,15 @@ def main():
             print('3. Salve o JSON baixado em:',mail.directory/'google-client.json')
             print('4. Execute: .venv\\Scripts\\python.exe -m cli.mail connect')
             print('Permissao solicitada: somente leitura. Nao use uma senha do Gmail.');return
+        if args.command=='outcomes':
+            from backend.core.application_outcomes import OutcomeTracker
+            tracker=OutcomeTracker(get_data_dir(),mail)
+            scan=None if args.no_scan else tracker.scan(args.max_messages,args.rescan)
+            report=dict(tracker.report(),scan=scan)
+            target=get_data_dir()/'reports';target.mkdir(exist_ok=True)
+            path=target/('outcomes-'+report['generated_at'][:19].replace(':','')+'.json');path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            print(json.dumps({'scan':scan,'total':report['total'],'by_platform':report['by_platform'],
+                'by_autonomous_answers':report['by_autonomous_answers'],'report':str(path)},ensure_ascii=False,indent=2));return
         if args.command=='connect':print(json.dumps(mail.connect(args.client),ensure_ascii=False,indent=2))
         else:
             if args.command=='check':mail.open()
