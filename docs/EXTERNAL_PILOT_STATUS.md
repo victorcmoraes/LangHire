@@ -46,3 +46,45 @@ in ignored `.local/`. The external executor and catalog are still development
 work; external operation has not been released in the packaged desktop. The
 shared daily pilot ceiling remains ten attempts. The larger pilot and 200/day
 release gate remain unchanged.
+
+## Lever: read-only diagnosis, 2026-10-28
+
+Phase 1 used existing attempt events, reviews, portal captures and a saved error
+screenshot. No forms were opened and no submissions were executed. The
+verification hold remains active. Detailed evidence references and transport
+hashes stay in ignored local reports.
+
+The uncertain history contains eight legacy records for four job identities,
+with no current evidence directories, and four newer attempts. The newer cases
+separate into two local failures without an HTTP receipt and two portal HTTP 400
+responses. One 400 came from the aggregator board and one from a direct company
+board. The saved screenshot and DOM capture show the same application-verification
+error. The direct CI&T and Swile legacy records do not establish a portal result.
+Do not treat the aggregator as the sole cause.
+
+Hypotheses, in the plan's investigation order:
+
+1. Hidden or altered required field: unresolved. Both rejected forms passed the
+   visible-control review. Historical form HTML identifies hidden location,
+   attachment, account, origin, timezone and consent fields, but no safe per-send
+   comparison of those fields was recorded. Visible review cannot establish the
+   server's hidden requirements.
+2. CAPTCHA expiry from delay: weakened. Human-hold entry to POST took about 155
+   seconds on the aggregator and seven seconds on the direct board; both failed.
+   Hold entry is not token issuance or resolution. Exact token age is unavailable,
+   so this does not rule out other verification failures.
+3. Browser/session or anti-automation verification: plausible, unconfirmed. The
+   same error across board origins and short/long waits supports investigating a
+   shared verification problem. No manual same-profile control exists. These
+   results do not establish an account restriction or justify bypassing protection.
+
+The Greenhouse comparison has confirmed receipts and uses a JSON/fetch transport;
+Lever uses a native document POST and reviews attachment/location state before
+forwarding. That difference is not an A/B control. Existing instrumentation stores
+cleaned URLs, status and body hashes, but not request headers, hidden-field
+snapshots or CAPTCHA timestamps. A header comparison cannot be reconstructed.
+
+Next experiment requires separate approval: a manual application to a fresh Lever
+job in the same profile. Only after that control should an explicitly approved
+single automated experiment be considered. Preserve uncertain identities and the
+platform hold; do not retry them. Phase 2 and Phase 3 have not started.
