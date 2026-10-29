@@ -135,3 +135,19 @@ Per-run reports in ignored `.local/reports/` distinguish preflight, actual
 browser attempts, submit intentions, confirmations, unknown answers, unsupported
 controls and paused channels. They record direct rules, cache and model calls
 separately and do not attribute another worker's attempts to the current run.
+
+## Arrangement and geography evidence
+
+Run `uv run python -m cli.external evidence --limit 50` to locate arrangement and
+eligible-location sentences with the configured local Ollama model, then rerun
+triage. It opens no browser and sends no applications. The report counts checked
+and cached jobs, verified remote/hybrid/onsite and Brazil allowed/excluded evidence,
+rejected quotes, failures and resulting triage states.
+
+The model only proposes verbatim quotes. Code checks the current description hash,
+quote text and explicit arrangement/geography patterns before using evidence;
+benefits and occasional remote work cannot establish a remote arrangement.
+Unknown or failed proposals leave unresolved jobs pending. The local cache at
+`external/arrangement-evidence.json` is reused only for the same description,
+model and prompt version. Explicit location and non-remote mode restrictions
+continue to take precedence.

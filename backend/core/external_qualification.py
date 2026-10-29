@@ -75,6 +75,9 @@ def qualify(job,facts,tracks=None):
         return result('pending','active_business_entity_not_confirmed',[line for line in required.splitlines() if 'CNPJ' in line])
     if re.search(r'(?:production.*LangGraph|LangGraph.*production)',required,re.I):
         return result('pending','specific_production_agent_requirement',[line for line in required.splitlines() if 'LangGraph' in line][:2])
+    arrangement=job.get('arrangement_evidence') or {}
+    quotes=[arrangement[k] for k in ('mode_quote','brazil_quote') if arrangement.get(k)]
+    if arrangement.get('brazil')=='excluded':return result('discarded','brazil_excluded_by_posting',quotes)
     location=job.get('location','')
     # A remote arrangement does not override an explicit residence restriction.
     allowed_locations=re.search(r'(?:eligible locations?|allowed locations?|localidades eleg[ií]veis|localiza[çc][õo]es eleg[ií]veis)[ \t]*:[ \t]*(?:\r?\n[ \t]*)?([^\r\n]+)',description,re.I)
@@ -86,7 +89,7 @@ def qualify(job,facts,tracks=None):
         listed_places={normalized(p) for p in re.split(r'[,;/|]|\b(?:or|and|ou|e)\b',allowed_locations[1],flags=re.I)}
         covered=any(p and p in listed_places for p in candidate_places)
         if not (resident_br and (country_wide or covered)):
-            return result('pending','explicit_residence_restriction_not_supported',[allowed_locations[0],location])
+            return result('pending','explicit_residence_restriction_not_supported',[allowed_locations[0],location]+quotes)
     # Benefits that mention occasional remote work are not a job's arrangement.
     explicit_mode=re.search(r'(?:work\s*type|\bmode|modalidade|modelo(?: de (?:trabalho|atua[çc][ãa]o))?)\s*:\s*(remot[eo]|hybrid|h[íi]brid[oa]|on.?site|presencial)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
@@ -95,31 +98,37 @@ def qualify(job,facts,tracks=None):
     # occasional remote-work benefit is not.
     home_policy=re.search(r'(?:can|may) (?:live|work) anywhere in (?:Brazil|Brasil)|(?:pode\w*|possibilidade de) (?:morar|trabalhar) (?:de |em )?qualquer (?:lugar|local) (?:do |no )?Brasil',description,re.I)
     remote_modes=('remote','remoto','remota')
-    remote=metadata_remote or bool(re.search(r'\bremot[eo]\b|home office',location+'\n'+title,re.I)) or bool(explicit_mode and normalized(explicit_mode[1]) in remote_modes) or bool(home_policy)
+    remote=arrangement.get('mode')=='remote' or metadata_remote or bool(re.search(r'\bremot[eo]\b|home office',location+'\n'+title,re.I)) or bool(explicit_mode and normalized(explicit_mode[1]) in remote_modes) or bool(home_policy)
     title_onsite=re.search(r'\bhybrid\b|hibrid[oa]|on.?site|presencial',normalized(title))
     location_onsite=re.search(r'\bhybrid\b|hibrid[oa]|on.?site|presencial',normalized(location))
     if location_onsite or title_onsite:remote=False
+    if arrangement.get('mode') in ('hybrid','onsite'):remote=False
     if hybrid or (explicit_mode and normalized(explicit_mode[1]) not in remote_modes):remote=False
     if not remote:
         if not any(re.search(r'\b'+re.escape(city)+r'\b',location,re.I) for city in home_cities(facts)):
+            if arrangement.get('mode') in ('hybrid','onsite'):
+                return result('discarded','onsite_or_hybrid_outside_home_region',[location]+quotes)
             if hybrid or explicit_mode or location_onsite or title_onsite or job.get('workplaceType') in ('hybrid','on-site'):
-                return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else title_onsite[0] if title_onsite else job['workplaceType']])
-            return result('pending','working_arrangement_needs_evidence',[location])
+                return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else title_onsite[0] if title_onsite else job['workplaceType']]+quotes)
+            return result('pending','working_arrangement_needs_evidence',[location]+quotes)
     country=job.get('country')
-    explicit_brazil=country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
-    if not explicit_brazil:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)])
+    explicit_brazil=arrangement.get('brazil')=='allowed' or country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
+    if not explicit_brazil:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)]+quotes)
     salary=job.get('salaryRange') or {}
     floor=facts.get('salary.minimumBrlMonthly',{}).get('value')
     if isinstance(floor,(int,float)) and salary.get('currency')=='BRL' and salary.get('interval') in ('month','monthly') and salary.get('max',float('inf'))<floor:
-        return result('discarded','published_salary_below_floor',[str(salary)])
+        return result('discarded','published_salary_below_floor',[str(salary)]+quotes)
     if not description.strip():return result('pending','missing_requirements',[title])
     evidence=[title,location,'country='+str(country),required[:2000]]
+    evidence.extend(quotes)
     if allowed_locations:evidence.append(allowed_locations[0])
     if home_policy:evidence.append(home_policy[0])
     return result('eligible','requirements_supported_and_brazil_location',evidence)
 
 
 def triage(data_dir):
+    from .arrangement_evidence import load_cache,cache_key,verified
+    cache=load_cache(data_dir)
     data=Path(data_dir);tracks=load_job_tracks(data);book=AnswerBook(data);store=AttemptStore(data)
     catalog=json.loads((data/'external/catalog.json').read_text(encoding='utf-8'))
     jobs=json.loads((data/'jobs.json').read_text(encoding='utf-8'))
@@ -129,7 +138,10 @@ def triage(data_dir):
     protected={job_key(a['job_url']) for a in store.list() if a['state'] in ('confirmed','uncertain','running','submitted','awaiting_human')}
     output=[]
     for key,old in previous.items():
-        job=current.get(key,old)
+        job=dict(current.get(key,old))
+        job.pop('arrangement_evidence',None)
+        entry=cache.get(cache_key(job))
+        if entry is not None:job['arrangement_evidence']=verified(job,entry)
         if job_key(old['url']) in protected:
             decision={'state':'protected','reason':'existing_confirmed_uncertain_or_active','evidence':[old['url']],'fact_refs':[]}
         elif key not in current:

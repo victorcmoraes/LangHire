@@ -25,6 +25,8 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='command',required=True)
     for name in ('status','collect','triage','stop'):sub.add_parser(name)
+    evidence=sub.add_parser('evidence',help='Locate and verify arrangement quotes locally; no browser, no sends')
+    evidence.add_argument('--limit',type=int)
     run=sub.add_parser('run');run.add_argument('--execution',choices=('review','submit'),default='review')
     run.add_argument('--limit',type=int,help='Maximum jobs this run; defaults to the complete eligible queue');run.add_argument('--platform',choices=('lever','greenhouse'))
     run.add_argument('--job-url')
@@ -51,6 +53,11 @@ def main():
     reconcile.add_argument('--capture',required=True);reconcile.add_argument('--screenshot',required=True)
     reconcile.add_argument('--mail-receipt',required=True)
     args=parser.parse_args();data=get_data_dir();store=AttemptStore(data)
+    if args.command=='evidence':
+        from backend.core.arrangement_evidence import extract
+        if args.limit is not None and args.limit<1:parser.error('--limit must be positive')
+        report=asyncio.run(extract(data,args.limit));report['triage']=triage(data)['states']
+        print(json.dumps(report,ensure_ascii=False,indent=2));return
     if args.command=='boards':
         from backend.core.external_boards import suggest_boards,add_boards
         report=suggest_boards(data,args.seeds,args.limit) if args.boards_command=='suggest' else add_boards(data,args.board)
