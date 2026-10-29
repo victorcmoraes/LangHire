@@ -76,6 +76,8 @@ async def preflight_greenhouse(data,job):
 
 
 class GreenhouseAdapter:
+    uploader_timeout=30000
+
     def __init__(self,page,job,data,attempt,monitor,status=None):
         self.page=page;self.job=job;self.data=Path(data);self.attempt=attempt;self.monitor=monitor
         self.book=AnswerBook(data);self.directory=Path(self.book.store.get(attempt)['evidence_dir'])
@@ -408,9 +410,16 @@ class GreenhouseAdapter:
         def uploader_response(response):
             parsed=urlsplit(response.url)
             return parsed.hostname in ('boards.greenhouse.io','job-boards.greenhouse.io','boards-api.greenhouse.io') and parsed.path.endswith('/uncacheable_attributes/presigned_fields')
-        async with self.page.expect_response(uploader_response,timeout=30000) as initialization:
-            await self.page.goto(self.job['url'],wait_until='domcontentloaded',timeout=45000)
-        response=await initialization.value
+        try:
+            async with self.page.expect_response(uploader_response,timeout=self.uploader_timeout) as initialization:
+                await self.page.goto(self.job['url'],wait_until='domcontentloaded',timeout=45000)
+            response=await initialization.value
+        except PlaywrightTimeoutError:
+            # Some employers redirect the hosted form to their own, often challenge-protected, site.
+            host=urlsplit(self.page.url).hostname
+            if host not in ('boards.greenhouse.io','job-boards.greenhouse.io'):
+                raise SafetyError('Hosted form redirected off Greenhouse to '+str(host)+'; apply manually') from None
+            raise
         await response.finished()
         configuration=await response.json() if response.ok else {}
         self.book.store.event(self.attempt,'greenhouse_upload_initialization',{'status':response.status,'resume_available':'resume' in configuration})

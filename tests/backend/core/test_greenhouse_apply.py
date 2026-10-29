@@ -343,6 +343,18 @@ async def test_education_degree_and_discipline_require_unique_mapping(education_
         with pytest.raises(SafetyError,match='Missing or ambiguous education option'):await adapter.run(pdf,'submit')
     assert not received and not store.submissions(aid)
 
+async def test_hosted_form_redirected_to_employer_site_stops_without_send(hosted_gh):
+    adapter,pdf,received,store,aid,page,state=hosted_gh
+    # The employer's challenge page never initializes the Greenhouse uploader.
+    async def employer(route):
+        if route.request.url.startswith('https://careers.example.invalid/'):await route.fulfill(content_type='text/html',body='Just a moment...')
+        else:await route.fulfill(content_type='text/html',body="<script>location.replace('https://careers.example.invalid/positions/123')</script>")
+    await page.route('**/*',employer)
+    adapter.uploader_timeout=500
+    with pytest.raises(SafetyError,match='redirected off Greenhouse to careers.example.invalid'):await adapter.run(pdf,'submit')
+    assert not received and not store.submissions(aid)
+
+
 async def test_greenhouse_rejection_is_not_confirmed(hosted_gh):
     adapter,pdf,received,store,aid,page,state=hosted_gh
     state['status']=400
