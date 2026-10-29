@@ -5,12 +5,13 @@ goal, while checkable facts still need confirmed evidence."""
 import json
 import os
 from pathlib import Path
+import re
 import time
 import types
 import uuid
 
 from .application_safety import now
-from .easy_answers import digest,valid_value,proposal_fact_sources,demographic_question,hard_fact_question,narrative_field,mapped_answer,experience_question,unknown_terms,asked_text
+from .easy_answers import digest,valid_value,salary_question,proposal_fact_sources,demographic_question,hard_fact_question,narrative_field,mapped_answer,experience_question,unknown_terms,asked_text
 
 
 def code_identity(code):
@@ -95,6 +96,12 @@ def fact_accepted(book,row,field,answer,job,value,refs):
     missing=unknown_terms(asked_text(row['question']),book.known_words()[1])
     if experience_question(row['question']) and (missing or not book.experience_supported(row['question'],refs)):
         return dict(answer,proposal_state='unsupported',proposal_reason='unknown_experience')
+    # A checkable number (percentages, years, amounts) must come from the cited facts, never the model.
+    # Option lists already constrain the value (their IDs are numeric), so only free text is checked.
+    cited=json.dumps([book.facts.get(ref,{}).get('value') for ref in refs],ensure_ascii=False)
+    # Salary unit conversions are validated separately by currency, period and floor.
+    if not row['field'].get('options') and not salary_question(row['question']) and any(number not in cited for number in re.findall(r'\d+(?:[.,]\d+)?',json.dumps(value,ensure_ascii=False))):
+        return dict(answer,proposal_state='unsupported',proposal_reason='ungrounded_number')
     return accepted(book,row,field,answer,value,refs)
 
 

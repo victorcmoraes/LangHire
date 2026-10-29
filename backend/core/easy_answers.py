@@ -150,6 +150,8 @@ def proposal_fact_sources(question, context, sources):
         company = normalized(context.get('company', ''))
         return {k:v for k,v in sources.items() if k.startswith('relationships.')
                 and company and normalized(v.get('scope','')) == company}
+    if re.search(r'where (?:are )?you (?:currently )?work|current (?:company|employer)|empresa (?:em que|onde) (?:voce )?trabalha|empresa atual', q):
+        return {k:v for k,v in sources.items() if k=='employer.current'}
     if re.search(r'employee email|corporate email|email corporativo',q):
         company=normalized(context.get('company',''))
         return {k:v for k,v in sources.items() if k.startswith('employment.email.') and company and normalized(v.get('scope',''))==company}
@@ -357,6 +359,10 @@ class AnswerBook:
                 if len(choices)==1:return {'value':choices[0],'refs':['availability.immediate'],'source':'rule'}
                 if not field.get('options') and field['type'] in ('text','textarea'):
                     return {'value':'Imediato' if context.get('language')=='pt' else 'Immediately', 'refs':['availability.immediate'],'source':'rule'}
+        # A yes/no declaration of working English is the confirmed level, not an experience claim.
+        if re.search(r'(?:able|capaz) (?:to )?(?:communicate|comunicar)\w*.{0,30}(?:english|ingles)',q) and normalized(str(self.facts.get('level.english',{}).get('value',''))) in ('proficient','advanced','fluent','native'):
+            choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]
+            if len(choices)==1:return {'value':choices[0],'refs':['level.english'],'source':'rule'}
         if field.get('category')=='demographic-consent':
             if field.get('declines_only') is True and field['type']=='checkbox':
                 return {'value':True,'refs':[],'source':'rule'}
@@ -468,9 +474,10 @@ class AnswerBook:
             'phone': ('phone', 'phone number', 'mobile phone number', 'numero de telefone', 'numero de celular', 'telefone', 'celular'),
             'phone.countryCode': ('phone country code', 'country code', 'codigo do pais', 'codigo de pais', 'please select your country phone code'),
             'location.city': ('city', 'cidade', 'what city are you located in'), 'location.state': ('state', 'estado'),
-            'url.linkedin': ('linkedin', 'linkedin profile', 'linkedin url'),
+            'url.linkedin': ('linkedin', 'linkedin profile', 'linkedin url', 'qual e o seu perfil do linkedin', 'qual o seu perfil do linkedin'),
             'url.github': ('github', 'github url'), 'employer.current': (
                 'current company', 'empresa atual', 'confirme o nome da empresa em que voce trabalha atualmente',
+                'where are you currently working please enter the full company name', 'where are you currently working',
                 'confirm the name of the company where you work',
                 'confirm the name of the company where you work confirme o nome da empresa em que voce trabalha atualmente'),
         }

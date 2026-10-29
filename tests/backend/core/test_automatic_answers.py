@@ -131,6 +131,28 @@ async def test_autonomous_grounded_fact_proposals_are_accepted(autonomous):
     assert result['source']=='autonomous' and result['value']=='Test Candidate' and len(calls)==1 and not tailored
 
 
+async def test_autonomous_checkable_number_must_come_from_cited_facts(autonomous,monkeypatch):
+    path,calls,tailored=autonomous
+    source=json.loads((path/'confirmed_facts.json').read_text())
+    source['facts'].append({'id':'compensation.variable.current','value':{'receives':True,'type':'bonus'},'source':'user'})
+    (path/'confirmed_facts.json').write_text(json.dumps(source))
+    async def invented(self,aid,settings,**kwargs):
+        calls.append(aid);return {'supported':True,'value':'10%','refs':['compensation.variable.current']}
+    monkeypatch.setattr(AnswerBook,'propose',invented)
+    q={'label':'Confirm your current variable compensation on your legal records','type':'text','options':[]}
+    result=await resolve_answer(AnswerBook(path),q,{'url':'one'})
+    assert result['proposal_reason']=='ungrounded_number' and 'value' not in result and len(calls)==1
+
+
+async def test_current_employer_question_is_answered_from_the_employer_fact_only(automatic):
+    path,calls=automatic
+    source=json.loads((path/'confirmed_facts.json').read_text());source['facts'].append({'id':'employer.current','value':'Example Co','source':'user'})
+    (path/'confirmed_facts.json').write_text(json.dumps(source))
+    q={'label':'Where are you currently working? (please enter the full company name)','type':'text','options':[]}
+    result=AnswerBook(path).resolve(q,{'url':'one'})
+    assert result['value']=='Example Co' and result['source']=='rule' and not calls
+
+
 async def test_unknown_experience_is_not_asked_again_until_facts_change(autonomous,monkeypatch):
     path,calls,tailored=autonomous
     async def unknown(self,aid,settings,*,job):tailored.append(aid);return {'supported':False,'reason':'unknown_experience','missing':['Kotlin']}

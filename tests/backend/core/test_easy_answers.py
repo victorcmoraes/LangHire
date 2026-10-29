@@ -142,6 +142,9 @@ def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_engl
                  'options':[{'text':'Não quero responder','value':'decline','decline_to_answer':True}]}
     assert b.resolve(demographic,br)['value']=='decline'
     assert b.context(portuguese['label'],dict(br,form_language='en'))['language']=='pt'
+    declaration={'label':'I declare that I am able to communicate functionally in English and acknowledge that this skill will be assessed.',
+                 'type':'select-one','options':[{'text':'Yes','value':'1'},{'text':'No','value':'0'}]}
+    assert b.resolve(declaration,br)=={'value':'1','refs':['level.english'],'source':'rule'}
 
 
 def test_profile_edits_replace_affected_facts_without_importing_untouched_defaults(tmp_path):
