@@ -29,8 +29,12 @@ locations list must cover the candidate's confirmed residence. Otherwise the job
 is held even if its form can be filled completely.
 Current coverage includes ordinary text, React single selects and the configured
 PDF, native checkbox groups, React multiple selects, phone calling codes and
-city/state/country autocomplete. Location and demographic schema sections are
-included in preflight. Demographic questions use an explicit decline option,
+city/state/country autocomplete, plus the first hosted education row: exact
+school suggestions
+(or an explicit Other fallback), unique degree/discipline options and dates from
+confirmed education facts. Missing facts or ambiguous options remain pending.
+Location and demographic schema sections are included in preflight.
+Demographic questions use an explicit decline option,
 without inferring a personal attribute. Their required processing checkbox is
 accepted only when all survey responses decline disclosure.
 The native, schema-required checkbox for processing the current application is

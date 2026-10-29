@@ -217,6 +217,132 @@ async def test_preflight_includes_auxiliary_questions_before_opening_browser(tmp
     assert [p['question'] for p in result['pending']]==['Location (City)']
     assert result['answer_metrics']['rule']==1
 
+
+@pytest.fixture
+async def education_gh(hosted_gh):
+    from core.easy_answers import AnswerBook
+    adapter,pdf,received,store,aid,page,state=hosted_gh
+    state.update(schools=['Fictional Academy Annex','Fictional Academy'],degree=['Bachelor of Arts','Master of Science','Doctor of Science'],
+                 discipline=['Computer Science','Mathematics'])
+    path=adapter.data/'confirmed_facts.json';facts=json.loads(path.read_text())
+    facts['facts'] += [{'id':k,'value':v,'source':'user'} for k,v in {
+        'education.school':'Fictional Academy','education.degree':'Bachelor of Computer Science',
+        'education.start':'2022-01-01','education.end':'2026-07-01'}.items()]
+    path.write_text(json.dumps(facts));adapter.book=AnswerBook(adapter.data)
+    async def schools(route):
+        await asyncio.sleep(.05)
+        await route.fulfill(content_type='application/json',body=json.dumps(state['schools']))
+    await page.context.route('**/education-schools?*',schools)
+    fill=adapter.fill
+    async def fill_education():
+        await page.locator('#application-form').evaluate('''(form,state)=>{
+            for(const kind of ['school','degree','discipline']){
+                const container=document.createElement('div');container.className='select__container';
+                container.innerHTML=`<label for="${kind}--0">${kind}*</label><div class="select__single-value"></div>
+                    <input id="${kind}--0" role="combobox" aria-required="true" aria-controls="${kind}-options">
+                    <input class="select__requiredInput" required style="opacity:0;width:1px;height:1px">
+                    <div role="listbox" id="${kind}-options" hidden></div>`;
+                form.append(container);const input=container.querySelector('[role=combobox]');
+                const list=container.querySelector('[role=listbox]');
+                function show(options){list.replaceChildren();list.hidden=false;for(const text of options){
+                    const option=document.createElement('div');option.setAttribute('role','option');option.textContent=text;
+                    option.onclick=()=>{container.querySelector('.select__single-value').textContent=text;
+                        container.querySelector('.select__requiredInput').value=text;input.value='';list.hidden=true;};list.append(option);}}
+                input.onkeydown=e=>{if(e.key==='Escape')list.hidden=true;};
+                if(kind==='school')input.oninput=async()=>{list.replaceChildren();show(await (await fetch('/education-schools?q='+encodeURIComponent(input.value))).json());};
+                else input.onclick=()=>show(state[kind]);
+            }
+            for(const kind of ['start-year','end-year','start-month','end-month']){
+                const input=document.createElement(state.native_dates?'select':'input');input.id=kind+'--0';
+                if(state.native_dates){
+                    input.add(new Option('Select',''));
+                    for(const [text,value] of (kind.endsWith('year')?[['2022','2022'],['2026','2026']]:[['January','01'],['July','07']]))input.add(new Option(text,value));
+                }else input.type='number';
+                input.required=true;form.append(input);
+            }
+            if(state.extra_row){const input=document.createElement('input');input.id='school--1';input.required=state.extra_required||false;form.append(input);}
+        }''',state)
+        await fill()
+    adapter.fill=fill_education
+    return hosted_gh
+
+
+@pytest.mark.parametrize('schools,chosen',[
+    (['Fictional Academy Annex','FICTIONAL ACADEMY','Other'],'FICTIONAL ACADEMY'),
+    (['Fictional Academy Annex','Other'],'Other'),
+    (['Fictional Academy Annex','Outra'],'Outra'),
+    (['Fictional Academy Annex'],None),
+    (['Fictional Academy','FICTIONAL ACADEMY','Other'],None),
+])
+async def test_education_exact_school_or_other_never_fuzzy(education_gh,schools,chosen):
+    adapter,pdf,received,store,aid,page,state=education_gh;state['schools']=schools
+    if chosen is None:
+        with pytest.raises(SafetyError,match='Missing or ambiguous education option'):await adapter.run(pdf,'submit')
+        assert await page.locator('[id="school--0"]').evaluate("e=>e.parentElement.querySelector('.select__single-value').textContent")==''
+        pending=json.loads((adapter.directory/'pending-answers.json').read_text())
+        assert len(pending)==1 and 'education option' in pending[0]['reason']
+    else:
+        await adapter.run(pdf,'review')
+        fields={f['id']:f for f in await adapter.inspect()}
+        assert all(f['category']=='education' for key,f in fields.items() if '--0' in key)
+        assert fields['school--0']['value']==chosen
+        assert fields['degree--0']['value']=='Bachelor of Arts'
+        assert fields['discipline--0']['value']=='Computer Science'
+        assert [fields[k+'--0']['value'] for k in ('start-year','end-year','start-month','end-month')]==['2022','2026','1','7']
+        assert (await adapter.review())['ready']
+        refs={a['question']:a['refs'] for a in adapter.used}
+        assert refs['school*']==['education.school'] and refs['discipline*']==['education.degree']
+        before=(await adapter.review())['digest']
+        await page.locator('[id="school--0"]').evaluate("e=>e.parentElement.querySelector('.select__single-value').textContent='Fictional Academy Annex'")
+        review=await adapter.review()
+        assert not review['ready'] and 'Accepted answer changed: school--0' in review['reason'] and review['digest']!=before
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('ref',['education.school','education.degree','education.start','education.end'])
+async def test_education_missing_facts_stay_pending(education_gh,ref):
+    from core.easy_answers import AnswerBook
+    adapter,pdf,received,store,aid,page,state=education_gh
+    path=adapter.data/'confirmed_facts.json';facts=json.loads(path.read_text())
+    facts['facts']=[f for f in facts['facts'] if f['id']!=ref];path.write_text(json.dumps(facts));adapter.book=AnswerBook(adapter.data)
+    with pytest.raises(SafetyError,match='Missing education fact: '+ref):await adapter.run(pdf,'submit')
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('extra_required',[False,True])
+async def test_education_native_dates_and_extra_rows(education_gh,extra_required):
+    adapter,pdf,received,store,aid,page,state=education_gh
+    state.update(native_dates=True,extra_row=True,extra_required=extra_required)
+    if extra_required:
+        with pytest.raises(SafetyError,match='Only education row 0 is supported'):await adapter.run(pdf,'submit')
+    else:
+        await adapter.run(pdf,'review')
+        assert (await adapter.review())['ready']
+    assert await page.locator('[id="start-month--0"]').input_value()=='01'
+    assert await page.locator('[id="end-month--0"]').input_value()=='07'
+    assert await page.locator('[id="school--1"]').input_value()==''
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('degree,options,discipline,ready',[
+    ('Bacharel em Computer Science',['Bachelor of Science'],['Computer Science'],True),
+    ('Master of Computer Science',['Master of Science'],['Computer Science'],True),
+    ('Doctor of Computer Science',['Doctor of Science'],['Computer Science'],True),
+    ('Bachelor of Computer Science',['Bachelor of Arts','Bachelor of Science'],['Computer Science'],False),
+    ('Bachelor of Computer Science',['Bachelor of Science'],['Computer Science and Mathematics'],False),
+])
+async def test_education_degree_and_discipline_require_unique_mapping(education_gh,degree,options,discipline,ready):
+    from core.easy_answers import AnswerBook
+    adapter,pdf,received,store,aid,page,state=education_gh
+    path=adapter.data/'confirmed_facts.json';facts=json.loads(path.read_text())
+    next(f for f in facts['facts'] if f['id']=='education.degree')['value']=degree
+    path.write_text(json.dumps(facts));adapter.book=AnswerBook(adapter.data)
+    state.update(degree=options,discipline=discipline)
+    if ready:await adapter.run(pdf,'review');assert (await adapter.review())['ready']
+    else:
+        with pytest.raises(SafetyError,match='Missing or ambiguous education option'):await adapter.run(pdf,'submit')
+    assert not received and not store.submissions(aid)
+
 async def test_greenhouse_rejection_is_not_confirmed(hosted_gh):
     adapter,pdf,received,store,aid,page,state=hosted_gh
     state['status']=400

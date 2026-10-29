@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 import urllib.request
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -120,6 +121,17 @@ class GreenhouseAdapter:
                         field['value']=match[0] if len(match)==1 else ''
                 else:field['value']=await target.input_value()
             fields.append(field)
+        education=await self.page.locator('#application-form').evaluate(r'''form=>[...form.querySelectorAll('input[id],select[id]')]
+            .filter(e=>/^(school|degree|discipline|start-month|start-year|end-month|end-year)--\d+$/.test(e.id)&&e.type!=='hidden'&&!e.disabled)
+            .map(e=>({id:e.id,name:e.name,label:e.getAttribute('aria-label')||[...(e.labels||[])].map(l=>l.innerText).join(' ')||e.id,
+                required:e.required||e.getAttribute('aria-required')==='true',render:e.getAttribute('role')||e.tagName.toLowerCase(),
+                value:e.getAttribute('role')==='combobox'?(e.closest('.select__container')?.querySelector('.select__single-value')?.innerText||''):e.value,
+                options:e.tagName==='SELECT'?[...e.options].map(o=>({text:o.text,value:o.value})):[]}))''')
+        for e in education:
+            if e['id'] in mapped:fields=[f for f in fields if f['id']!=e['id']]
+            mapped.add(e['id'])
+            fields.append(dict(e,category='education',kind=e['id'].split('--')[0],present=True,
+                               type='select-one' if e['render']=='select' else 'text'))
         # Helpers within mapped React selects are not separate questions. Genuine
         # newly visible required controls must nevertheless block the review.
         unknown=await self.page.locator('#application-form').evaluate(r'''(form,mapped)=>[...form.querySelectorAll('input,select,textarea')].filter(e=>{
@@ -150,9 +162,60 @@ class GreenhouseAdapter:
             fields.append(field)
         return fields
 
+    async def education_answer(self,field):
+        kind=field['kind'];ref='education.'+('degree' if kind in ('degree','discipline') else kind.split('-')[0])
+        def pending(reason):return {'pending':reason,'proposal_reason':reason,'source':'pending'}
+        if not field['id'].endswith('--0'):return pending('Only education row 0 is supported')
+        fact=self.book.facts.get(ref,{}).get('value')
+        if not isinstance(fact,str) or not fact.strip():return pending('Missing education fact: '+ref)
+        value=fact
+        if '-' in kind:
+            try:date=datetime.strptime(fact,'%Y-%m-%d')
+            except ValueError:return pending('Invalid ISO date: '+ref)
+            value=str(date.year if kind.endswith('year') else date.month)
+        elif kind=='discipline':
+            parts=re.split(r'\s+(?:of|em)\s+',fact,maxsplit=1,flags=re.I)
+            if len(parts)!=2:return pending('No discipline in education.degree')
+            value=parts[1]
+        family=next((name for prefix,name in [('bachelor','bachelor'),('bacharel','bachelor'),('master','master'),('mestre','master'),('doctor','doctor'),('doutor','doctor')]
+                     if normalized(fact).startswith(prefix)),None) if kind=='degree' else None
+        if kind=='degree' and not family:return pending('Unsupported education.degree level')
+        target=self.target(field['id']);options=field['options']
+        if field['render']=='combobox':
+            await target.click();await target.fill(value if kind=='school' else '')
+            controls=await target.get_attribute('aria-controls')
+            choices=self.target(controls).get_by_role('option') if controls else self.page.locator('[role=option]:visible')
+            try:await choices.first.wait_for(state='visible',timeout=15000)
+            except PlaywrightTimeoutError:
+                await target.press('Escape');return pending('No education options: '+field['label'])
+            options=[{'text':text,'value':text} for text in await choices.all_text_contents()]
+        if options:
+            def date_option(option):
+                if '-' not in kind:return False
+                for text in (option['text'],option['value']):
+                    if re.fullmatch(r'\d+',text) and int(text)==int(value):return True
+                if kind.endswith('month'):
+                    months=[('january','janeiro'),('february','fevereiro'),('march','marco'),('april','abril'),('may','maio'),('june','junho'),
+                            ('july','julho'),('august','agosto'),('september','setembro'),('october','outubro'),('november','novembro'),('december','dezembro')]
+                    return normalized(option['text']) in months[date.month-1]
+                return False
+            matches=[o for o in options if (normalized(o['text']).startswith(family) if family else
+                     normalized(o['text'])==normalized(value) or date_option(o))]
+            if not matches and kind=='school':matches=[o for o in options if normalized(o['text']) in ('other','outra','outro')]
+            if len(matches)!=1:
+                if field['render']=='combobox':await target.press('Escape')
+                return pending('Missing or ambiguous education option: '+field['label'])
+            value=matches[0]['value']
+            if field['render']=='combobox':
+                await choices.filter(has_text=re.compile(r'^'+re.escape(matches[0]['text'])+r'$')).click()
+                return {'value':value,'refs':[ref],'source':'rule','education_selected':True}
+        elif kind in ('school','degree','discipline') or field['render']=='select':return pending('No education options: '+field['label'])
+        return {'value':value,'refs':[ref],'source':'rule'}
+
     async def set(self,field,answer):
         target=self.target(field['id']);value=answer['value']
-        if field['type']=='checkbox':await target.set_checked(value)
+        if answer.get('education_selected'):pass  # Selection was resolved against the live listbox.
+        elif field['type']=='checkbox':await target.set_checked(value)
         elif field['type']=='phone-country':
             if value!='+55':raise SafetyError('Unsupported phone-country combination')
             await target.click();await target.fill('55')
@@ -234,7 +297,8 @@ class GreenhouseAdapter:
                 if field['required']:
                     missing.append('Unsupported control: '+field['label']);pending.append({'question':field['label'],'reason':'unsupported_required_control','control':field['type']})
                 continue
-            answer=await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))
+            answer=await self.education_answer(field) if field.get('category')=='education' else (await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job)))
+            if field.get('category')=='education' and 'pending' in answer and not field['required']:continue
             if not answer:continue
             self.metrics[answer['source']]+=1
             if 'pending' in answer:
