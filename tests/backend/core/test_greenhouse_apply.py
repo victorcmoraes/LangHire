@@ -252,7 +252,7 @@ async def education_gh(hosted_gh):
                     option.onclick=()=>{container.querySelector('.select__single-value').textContent=text;
                         container.querySelector('.select__requiredInput').value=text;input.value='';list.hidden=true;};list.append(option);}}
                 input.onkeydown=e=>{if(e.key==='Escape')list.hidden=true;};
-                if(kind==='school')input.oninput=async()=>{list.replaceChildren();show(await (await fetch('/education-schools?q='+encodeURIComponent(input.value))).json());};
+                if(kind==='school')input.onkeyup=async()=>{list.replaceChildren();show(await (await fetch('/education-schools?q='+encodeURIComponent(input.value))).json());};
                 else input.onclick=()=>show(state[kind]);
             }
             for(const kind of ['start-year','end-year','start-month','end-month']){

@@ -184,7 +184,8 @@ class GreenhouseAdapter:
         if kind=='degree' and not family:return pending('Unsupported education.degree level')
         target=self.target(field['id']);options=field['options']
         async def listed(term):
-            await target.click();await target.fill(term)
+            # Greenhouse's async select searches on key events; fill() alone never queries it.
+            await target.click();await target.fill('');await target.press_sequentially(term,delay=40)
             controls=await target.get_attribute('aria-controls')
             found=self.target(controls).get_by_role('option') if controls else self.page.locator('[role=option]:visible')
             # An empty search renders "No options" text rather than option elements.
