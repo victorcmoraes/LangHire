@@ -128,6 +128,7 @@ def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_engl
     (tmp_path/'confirmed_facts.json').write_text(json.dumps(source));b=AnswerBook(tmp_path)
     br={'url':'br-job','eligibility_country':'BR','form_language':'pt'}
     assert b.resolve({'label':'CPF','type':'text','options':[]},br)['value']=='12345678909'
+    assert b.resolve({'label':'Qual é o seu CPF? (Formato: XXX.XXX.XXX-XX)','type':'text','options':[]},br)['value']=='123.456.789-09'
     assert b.resolve({'label':'Nacionalidade','type':'text','options':[]},br)['value']=='Brasileira'
     q={'label':'Are you a citizen or permanent resident of the country where this position is based?','type':'select-one','options':[{'text':'Yes','value':'y'},{'text':'No','value':'n'}]}
     assert b.resolve(q,br)['value']=='y'

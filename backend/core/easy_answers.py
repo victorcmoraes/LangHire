@@ -398,6 +398,11 @@ class AnswerBook:
             cpf=self.facts.get('identity.cpf')
             if cpf and re.fullmatch(r'(?:numero do )?cpf(?: somente numeros| apenas numeros)?',q):
                 if valid_value(field,cpf['value']):return {'value':cpf['value'],'refs':['identity.cpf'],'source':'rule'}
+            # "Qual é o seu CPF? (Formato: XXX.XXX.XXX-XX)": same confirmed number, in the requested mask.
+            digits=re.sub(r'\D','',str(cpf['value'])) if cpf else ''
+            if len(digits)==11 and re.fullmatch(r'(?:qual (?:e )?o seu )?cpf(?: formato xxx xxx xxx xx)?',q):
+                masked=f'{digits[:3]}.{digits[3:6]}.{digits[6:9]}-{digits[9:]}' if 'xxx xxx' in q else digits
+                if valid_value(field,masked):return {'value':masked,'refs':['identity.cpf'],'source':'rule'}
             nationality=self.facts.get('nationality')
             if nationality and normalized(str(nationality['value'])) in ('brazilian','brasileiro','brasileira'):
                 if q in ('nationality','nacionalidade','what is your nationality','qual e a sua nacionalidade'):
