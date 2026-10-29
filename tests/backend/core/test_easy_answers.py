@@ -147,6 +147,19 @@ def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_engl
     assert b.resolve(declaration,br)=={'value':'1','refs':['level.english'],'source':'rule'}
 
 
+def test_referral_is_answered_only_for_the_company_where_it_was_confirmed(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[
+        {'id':'referral.examplebank','value':{'name':'Test Referrer','role':'Account Manager'},'source':'user'}]}))
+    b=AnswerBook(tmp_path);job={'url':'job','eligibility_country':'BR','form_language':'pt','company':'Example Bank'}
+    text={'label':'Você foi indicado por alguém? Se sim, quem?','type':'text','options':[]}
+    choice={'label':'Were you referred by an employee?','type':'select-one','options':[{'text':'Yes','value':'y'},{'text':'No','value':'n'}]}
+    assert b.resolve(text,job)['value']=='Test Referrer (Account Manager)'
+    assert b.resolve(choice,job)['value']=='y'
+    assert b.resolve(choice,dict(job,company='Other Co'))['value']=='n'
+    know={'label':'Do you know anyone who works here?','type':'text','options':[]}
+    assert 'pending' in b.resolve(know,dict(job,company='Other Co'))
+
+
 def test_accommodation_questions_follow_the_accessibility_fact(tmp_path):
     (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'accessibility','value':False,'source':'user'}]}))
     b=AnswerBook(tmp_path);br={'url':'br-job','eligibility_country':'BR','form_language':'pt'}

@@ -218,7 +218,8 @@ class GreenhouseAdapter:
             if len(current)!=1 or current[0]['value'] is not True:return pending('No checked current-role control for employment row 0')
             if any(f['id']==field['id'] and f['required'] for f in fields):
                 return pending('End date required for a current role')
-            if not await target.is_visible():
+            # Checking the current role disables (rather than hides) the end date on some boards.
+            if not await target.is_visible() or await target.is_disabled():
                 if any(f['id']==field['id'] and f['value'] for f in fields):return pending('End date not cleared for a current role')
                 return None
             return {'value':'','refs':['employer.current'],'source':'rule'}

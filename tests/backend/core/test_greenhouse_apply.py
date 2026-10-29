@@ -388,6 +388,7 @@ async def employment_gh(hosted_gh):
                         input.value='';input.required=false;input.removeAttribute('aria-required');
                         const container=input.closest('.select__container');
                         if(container){container.querySelector('.select__single-value').textContent='';container.hidden=true;}
+                        else if(state.disable_end)input.disabled=true;
                         else input.hidden=true;
                     }
                 };
@@ -397,6 +398,14 @@ async def employment_gh(hosted_gh):
         await fill()
     adapter.fill=fill_employment
     return hosted_gh
+
+
+async def test_current_role_that_disables_end_year_is_not_filled(employment_gh):
+    adapter,pdf,received,store,aid,page,state=employment_gh
+    state.update(months=['January','March'],disable_end=True)
+    await adapter.run(pdf,'review')
+    assert await page.locator('[id="end-date-year-0"]').is_disabled()
+    assert (await adapter.review())['ready'] and not received and not store.submissions(aid)
 
 
 @pytest.mark.parametrize('months,chosen,label_checkbox',[

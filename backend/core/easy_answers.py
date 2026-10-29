@@ -303,7 +303,7 @@ class AnswerBook:
         q = normalized(question)
         # Country comes from qualification, never from a mention inside a description.
         context = {'country': job.get('eligibility_country', ''), 'language': job.get('form_language', 'unknown'),
-                'company': job.get('company', '') if re.search(r'family|relative|related to|know anyone|worked.*(?:here|company)|employ(?:ed|ee|ment)|contracted|subsidiar|conflict|consent|privacy|acknowledg|familiar|parentesco|empresa|cliente|parceir|partner|company|sponsor', q) else '',
+                'company': job.get('company', '') if re.search(r'family|relative|related to|know anyone|referr|indicad|indicacao|conhece algu|worked.*(?:here|company)|employ(?:ed|ee|ment)|contracted|subsidiar|conflict|consent|privacy|acknowledg|familiar|parentesco|empresa|cliente|parceir|partner|company|sponsor', q) else '',
                 'currency': job.get('salary_currency', ''), 'period': job.get('salary_period', '')}
         if re.search(r'\b(?:voce|qual|quais|possui|sua|seu|nacionalidade|raca|genero|orientacao)\b',q):context['language']='pt'
         if re.search(r'why.{0,60}(?:this role|this position|our team)|interest.{0,40}(?:role|position)|por que.{0,60}(?:vaga|equipe)',q):
@@ -450,9 +450,21 @@ class AnswerBook:
         if field.get('type')=='checkbox' and re.match(r'^(siga a empresa|follow (?:the )?company)\b',q):
             # Applying does not authorize opting into unrelated company updates.
             return {'value':False,'refs':[],'source':'rule'}
-        # This system finds jobs itself; nobody referred the candidate.
-        if re.search(r'\breferred\b|\breferral\b|indicad[oa] (?:por|para)|\bindicacao\b',q):
-            if field.get('options'):
+        # This system finds jobs itself; nobody referred the candidate unless a
+        # company-scoped referral was confirmed (referral.<company>: name and role).
+        if re.search(r'\breferred\b|\breferral\b|indicad[oa] (?:por|para)|\bindicacao\b|know anyone|conhece algu',q):
+            referral=self.facts.get('referral.'+normalized(context.get('company','')).replace(' ',''),{}).get('value')
+            if isinstance(referral,dict) and referral.get('name'):
+                ref='referral.'+normalized(context.get('company','')).replace(' ','')
+                if field.get('options'):
+                    choices=[o['value'] for o in field['options'] if re.match(r'(?:yes|sim)\b',normalized(o['text']))]
+                    if len(choices)==1:return {'value':choices if field['type']=='checkbox-group' else choices[0],'refs':[ref],'source':'rule'}
+                    return None
+                if field['type'] in ('text','textarea'):
+                    return {'value':referral['name']+(' ('+referral['role']+')' if referral.get('role') else ''),'refs':[ref],'source':'rule'}
+                return None
+            if re.search(r'know anyone|conhece algu',q):pass  # Acquaintance without a referral fact stays with the relationship facts.
+            elif field.get('options'):
                 choices=[o['value'] for o in field['options'] if re.match(r'(?:no|nao)\b',normalized(o['text']))]
                 if len(choices)==1:return {'value':choices[0],'refs':[],'source':'rule'}
             elif field['type'] in ('text','textarea'):
