@@ -134,6 +134,40 @@ class GreenhouseAdapter:
             mapped.add(e['id'])
             fields.append(dict(e,category='education',kind=e['id'].split('--')[0],present=True,
                                type='select-one' if e['render']=='select' else 'text'))
+        employment=await self.page.locator('#application-form').evaluate(r'''form=>{
+            const pattern=/^(company-name|title|start-date-month|start-date-year|end-date-month|end-date-year|current-role)-(\d+)$/;
+            const controls=[...form.querySelectorAll('input[id],select[id]')].filter(e=>pattern.test(e.id)&&e.type!=='hidden'&&!e.disabled);
+            const rows=new Map();
+            for(const company of controls.filter(e=>e.id.startsWith('company-name-'))){
+                const index=company.id.match(pattern)[2];
+                if(controls.some(e=>e.id==='current-role-'+index))continue;
+                let row=company.parentElement;
+                while(row&&row!==form){
+                    if([...row.querySelectorAll('input[id]')].some(e=>e.id.startsWith('company-name-')&&e!==company))break;
+                    const matches=[...row.querySelectorAll('input[type=checkbox][id]')].filter(e=>!e.disabled&&
+                        /current|atual/i.test([...(e.labels||[])].map(l=>l.innerText).join(' ')+' '+(e.getAttribute('aria-label')||'')));
+                    if([...row.querySelectorAll('input[id]')].some(e=>e.id==='title-'+index)&&matches.length){
+                        if(matches.length===1&&!controls.includes(matches[0])){controls.push(matches[0]);rows.set(matches[0],index);}
+                        break;
+                    }
+                    row=row.parentElement;
+                }
+            }
+            return controls.map(e=>({id:e.id,name:e.name,kind:e.id.match(pattern)?.[1]||'current-role',
+                row:e.id.match(pattern)?.[2]||rows.get(e),
+                label:e.getAttribute('aria-label')||[...(e.labels||[])].map(l=>l.innerText).join(' ')||e.id,
+                required:!!e.getClientRects().length&&(e.required||e.getAttribute('aria-required')==='true'||
+                    !!e.closest('.select__container')?.querySelector('input[required]')),
+                visible:!!e.getClientRects().length,render:e.getAttribute('role')||e.tagName.toLowerCase(),
+                value:e.type==='checkbox'?e.checked:e.getAttribute('role')==='combobox'?
+                    (e.closest('.select__container')?.querySelector('.select__single-value')?.innerText||''):e.value,
+                options:e.tagName==='SELECT'?[...e.options].map(o=>({text:o.text,value:o.value})):[]}));
+        }''')
+        for e in employment:
+            if e['id'] in mapped:fields=[f for f in fields if f['id']!=e['id']]
+            mapped.add(e['id'])
+            fields.append(dict(e,category='employment',present=True,
+                type='checkbox' if e['kind']=='current-role' else 'select-one' if e['render']=='select' else 'text'))
         # Helpers within mapped React selects are not separate questions. Genuine
         # newly visible required controls must nevertheless block the review.
         unknown=await self.page.locator('#application-form').evaluate(r'''(form,mapped)=>[...form.querySelectorAll('input,select,textarea')].filter(e=>{
@@ -164,6 +198,62 @@ class GreenhouseAdapter:
             fields.append(field)
         return fields
 
+    async def listed(self,target,term):
+        # Greenhouse's async select searches on key events; fill() alone never queries it.
+        await target.click();await target.fill('');await target.press_sequentially(term,delay=40)
+        controls=await target.get_attribute('aria-controls')
+        found=self.target(controls).get_by_role('option') if controls else self.page.locator('[role=option]:visible')
+        # An empty search renders "No options" text rather than option elements.
+        try:await found.first.wait_for(state='visible',timeout=8000)
+        except PlaywrightTimeoutError:return found,[]
+        return found,[{'text':text,'value':text} for text in await found.all_text_contents()]
+
+    async def employment_answer(self,field):
+        def pending(reason):return {'pending':reason,'proposal_reason':reason,'source':'pending'}
+        if field.get('row')!='0':return pending('Only employment row 0 is supported')
+        kind=field['kind'];target=self.target(field['id'])
+        if kind.startswith('end-date-'):
+            fields=await self.inspect()
+            current=[f for f in fields if f.get('category')=='employment' and f.get('row')=='0' and f['kind']=='current-role']
+            if len(current)!=1 or current[0]['value'] is not True:return pending('No checked current-role control for employment row 0')
+            if any(f['id']==field['id'] and f['required'] for f in fields):
+                return pending('End date required for a current role')
+            if not await target.is_visible():
+                if any(f['id']==field['id'] and f['value'] for f in fields):return pending('End date not cleared for a current role')
+                return None
+            return {'value':'','refs':['employer.current'],'source':'rule'}
+        ref={'company-name':'employer.current','title':'employment.title.current','current-role':'employer.current'}.get(kind,'experience.start')
+        fact=self.book.facts.get(ref,{}).get('value')
+        if not isinstance(fact,str) or not fact.strip():return pending('Missing employment fact: '+ref)
+        if kind=='current-role':return {'value':True,'refs':[ref],'source':'rule'}
+        value=fact
+        if kind.startswith('start-date-'):
+            try:date=datetime.strptime(fact,'%Y-%m-%d')
+            except ValueError:return pending('Invalid ISO date: '+ref)
+            value=str(date.month if kind.endswith('month') else date.year)
+        options=field['options']
+        if field['render']=='combobox':choices,options=await self.listed(target,'')
+        if options:
+            months=[('january','janeiro'),('february','fevereiro'),('march','marco'),('april','abril'),('may','maio'),('june','junho'),
+                    ('july','julho'),('august','agosto'),('september','setembro'),('october','outubro'),('november','novembro'),('december','dezembro')]
+            def matches(option):
+                if kind=='start-date-month':
+                    return any((re.fullmatch(r'\d+',text) and int(text)==date.month) or normalized(text) in months[date.month-1]
+                               for text in (option['text'],option['value']))
+                return normalized(option['text'])==normalized(value) or option['value']==value
+            found=[o for o in options if matches(o)]
+            if len(found)!=1:
+                if field['render']=='combobox':await target.press('Escape')
+                return pending('Missing or ambiguous employment option: '+field['label'])
+            value=found[0]['value']
+            if field['render']=='combobox':
+                await choices.filter(has_text=re.compile(r'^'+re.escape(found[0]['text'])+r'$')).click()
+                return {'value':value,'refs':[ref],'source':'rule','employment_selected':True}
+        elif field['render'] in ('combobox','select'):
+            if field['render']=='combobox':await target.press('Escape')
+            return pending('No employment options: '+field['label'])
+        return {'value':value,'refs':[ref],'source':'rule'}
+
     async def education_answer(self,field):
         kind=field['kind'];ref='education.'+('degree' if kind in ('degree','discipline') else kind.split('-')[0])
         def pending(reason):return {'pending':reason,'proposal_reason':reason,'source':'pending'}
@@ -183,21 +273,12 @@ class GreenhouseAdapter:
                      if normalized(fact).startswith(prefix)),None) if kind=='degree' else None
         if kind=='degree' and not family:return pending('Unsupported education.degree level')
         target=self.target(field['id']);options=field['options']
-        async def listed(term):
-            # Greenhouse's async select searches on key events; fill() alone never queries it.
-            await target.click();await target.fill('');await target.press_sequentially(term,delay=40)
-            controls=await target.get_attribute('aria-controls')
-            found=self.target(controls).get_by_role('option') if controls else self.page.locator('[role=option]:visible')
-            # An empty search renders "No options" text rather than option elements.
-            try:await found.first.wait_for(state='visible',timeout=8000)
-            except PlaywrightTimeoutError:return found,[]
-            return found,[{'text':text,'value':text} for text in await found.all_text_contents()]
         if field['render']=='combobox':
-            choices,options=await listed(value if kind=='school' else '')
+            choices,options=await self.listed(target,value if kind=='school' else '')
             # Schools missing from the catalog fall back to its exact "Other" entry, never a similar name.
             if kind=='school' and not any(normalized(o['text'])==normalized(value) for o in options):
                 for term in ('Other','Outra'):
-                    choices,options=await listed(term)
+                    choices,options=await self.listed(target,term)
                     options=[o for o in options if normalized(o['text']) in ('other','outra','outro')]
                     if options:break
             if not options:
@@ -227,7 +308,7 @@ class GreenhouseAdapter:
 
     async def set(self,field,answer):
         target=self.target(field['id']);value=answer['value']
-        if answer.get('education_selected'):pass  # Selection was resolved against the live listbox.
+        if answer.get('education_selected') or answer.get('employment_selected'):pass  # Selection was resolved against the live listbox.
         elif field['type']=='checkbox':await target.set_checked(value)
         elif field['type']=='phone-country':
             if value!='+55':raise SafetyError('Unsupported phone-country combination')
@@ -297,7 +378,10 @@ class GreenhouseAdapter:
 
     async def fill(self):
         self.stage('fill_external');missing=[];pending=[]
-        for field in await self.inspect():
+        fields=await self.inspect()
+        # Current role must be checked before resolving end dates, regardless of DOM order.
+        fields.sort(key=lambda f:1 if f.get('category')=='employment' and f['kind'].startswith('end-date-') else 0)
+        for field in fields:
             if field.get('category')=='demographic-consent':continue  # Resolve after survey choices are accepted.
             if not field['present']:
                 if field['required']:missing.append('Missing required control: '+field['label'])
@@ -310,9 +394,12 @@ class GreenhouseAdapter:
                 if field['required']:
                     missing.append('Unsupported control: '+field['label']);pending.append({'question':field['label'],'reason':'unsupported_required_control','control':field['type']})
                 continue
-            answer=await self.education_answer(field) if field.get('category')=='education' else (await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job)))
-            if field.get('category')=='education' and 'pending' in answer and not field['required']:continue
+            if field.get('category')=='employment':answer=await self.employment_answer(field)
+            elif field.get('category')=='education':answer=await self.education_answer(field)
+            else:answer=await resolve_answer(self.book,field,self.job,self.metrics) if field['required'] else self.book.direct(field,self.book.context(field['label'],self.job))
             if not answer:continue
+            if 'pending' in answer and not field['required'] and (field.get('category')=='education' or
+                    field.get('category')=='employment' and field.get('row')!='0'):continue
             self.metrics[answer['source']]+=1
             if 'pending' in answer:
                 missing.append(str(answer['pending']));pending.append({'question':field['label'],'answer_id':answer['pending'],'reason':answer.get('proposal_reason','unconfirmed_answer')});continue
@@ -338,6 +425,10 @@ class GreenhouseAdapter:
             equal=sorted(actual)==sorted(value) if isinstance(actual,list) and isinstance(value,list) else str(actual)==str(value)
             if not equal:problems.append('Accepted answer changed: '+name)
         for field in fields:
+            if field.get('category')=='employment' and field.get('row')=='0' and field['kind'].startswith('end-date-'):
+                current=any(f.get('category')=='employment' and f.get('row')=='0' and f['kind']=='current-role' and f['value'] is True for f in fields)
+                if current and field['required']:problems.append('End date required for a current role')
+                if current and field['value']:problems.append('End date not cleared for a current role')
             if field['required'] and (not field['present'] or field['value'] in ('',[],False)):
                 if field['id']!='resume' or not self.resume_verified:problems.append(field['label'])
         approved={q['id']:q for q in self.book.list()}

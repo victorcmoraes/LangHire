@@ -33,6 +33,7 @@ city/state/country autocomplete, plus the first hosted education row: exact
 school suggestions
 (or an explicit Other fallback), unique degree/discipline options and dates from
 confirmed education facts. Missing facts or ambiguous options remain pending.
+The first hosted employment row uses confirmed company, title and start-date facts, with a checked current-role control; required end dates remain pending.
 Location and demographic schema sections are included in preflight.
 Demographic questions use an explicit decline option,
 without inferring a personal attribute. Their required processing checkbox is

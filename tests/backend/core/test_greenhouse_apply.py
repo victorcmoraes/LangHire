@@ -346,6 +346,144 @@ async def test_education_degree_and_discipline_require_unique_mapping(education_
         with pytest.raises(SafetyError,match='Missing or ambiguous education option'):await adapter.run(pdf,'submit')
     assert not received and not store.submissions(aid)
 
+@pytest.fixture
+async def employment_gh(hosted_gh):
+    from core.easy_answers import AnswerBook
+    adapter,pdf,received,store,aid,page,state=hosted_gh
+    state.update(months=['January','March'],current_role=True)
+    path=adapter.data/'confirmed_facts.json';facts=json.loads(path.read_text())
+    facts['facts'] += [{'id':k,'value':v,'source':'user'} for k,v in {
+        'employer.current':'Fictional Company','employment.title.current':'Fixture Engineer','experience.start':'2023-03-12'}.items()]
+    path.write_text(json.dumps(facts));adapter.book=AnswerBook(adapter.data)
+    fill=adapter.fill
+    async def fill_employment():
+        await page.locator('#application-form').evaluate('''(form,state)=>{
+            const row=document.createElement('fieldset');form.append(row);
+            for(const kind of ['company-name','title','start-date-month','start-date-year','end-date-month','end-date-year']){
+                if(kind.endsWith('month')){
+                    const container=document.createElement('div');container.className='select__container';
+                    container.innerHTML=`<label for="${kind}-0">${kind}*</label><div class="select__single-value"></div>
+                        <input id="${kind}-0" role="combobox" aria-required="true" aria-controls="${kind}-options">
+                        <input class="select__requiredInput" required style="opacity:0;width:1px;height:1px">
+                        <div role="listbox" id="${kind}-options" hidden></div>`;
+                    row.append(container);const input=container.querySelector('[role=combobox]');
+                    const list=container.querySelector('[role=listbox]');
+                    input.onclick=()=>{list.replaceChildren();list.hidden=false;for(const text of state.months){
+                        const option=document.createElement('div');option.setAttribute('role','option');option.textContent=text;
+                        option.onclick=()=>{container.querySelector('.select__single-value').textContent=text;
+                            container.querySelector('.select__requiredInput').value=text;input.value='';list.hidden=true;};list.append(option);}};
+                    input.onkeydown=e=>{if(e.key==='Escape')list.hidden=true;};
+                }else{
+                    const label=document.createElement('label');label.htmlFor=kind+'-0';label.textContent=kind+'*';row.append(label);
+                    const input=document.createElement('input');input.id=label.htmlFor;input.required=true;
+                    if(kind.endsWith('year'))input.type='number';row.append(input);
+                }
+            }
+            if(state.current_role){
+                const label=document.createElement('label');label.htmlFor=state.label_checkbox?'still-working-0':'current-role-0';
+                label.textContent='Trabalho atual';row.append(label);
+                const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.id=label.htmlFor;row.append(checkbox);
+                checkbox.onchange=()=>{if(state.end_required)return;
+                    for(const input of row.querySelectorAll('[id^="end-date-"]')){
+                        input.value='';input.required=false;input.removeAttribute('aria-required');
+                        const container=input.closest('.select__container');
+                        if(container){container.querySelector('.select__single-value').textContent='';container.hidden=true;}
+                        else input.hidden=true;
+                    }
+                };
+            }
+            if(state.extra_row){const input=document.createElement('input');input.id='company-name-1';input.required=state.extra_required||false;form.append(input);}
+        }''',state)
+        await fill()
+    adapter.fill=fill_employment
+    return hosted_gh
+
+
+@pytest.mark.parametrize('months,chosen,label_checkbox',[
+    (['January','March'],'March',False),
+    (['Janeiro','Março'],'Março',True),
+    (['01','03'],'03',False),
+])
+async def test_employment_current_role_dates_refs_and_review(employment_gh,months,chosen,label_checkbox):
+    adapter,pdf,received,store,aid,page,state=employment_gh
+    state.update(months=months,label_checkbox=label_checkbox)
+    await adapter.run(pdf,'review')
+    fields={f['id']:f for f in await adapter.inspect()}
+    assert all(fields[key]['category']=='employment' for key in ('company-name-0','title-0','start-date-month-0','start-date-year-0'))
+    assert fields['company-name-0']['value']=='Fictional Company'
+    assert fields['title-0']['value']=='Fixture Engineer'
+    assert fields['start-date-month-0']['value']==chosen and fields['start-date-year-0']['value']=='2023'
+    assert fields['end-date-month-0']['value']==fields['end-date-year-0']['value']==''
+    checkbox='still-working-0' if label_checkbox else 'current-role-0'
+    assert fields[checkbox]['value'] is True
+    refs={a['question']:a['refs'] for a in adapter.used}
+    assert refs['company-name*']==['employer.current'] and refs['title*']==['employment.title.current']
+    assert refs['start-date-month*']==refs['start-date-year*']==['experience.start']
+    review=await adapter.review();assert review['ready']
+    await page.locator('[id="start-date-month-0"]').evaluate("e=>e.parentElement.querySelector('.select__single-value').textContent='January'")
+    changed=await adapter.review()
+    assert not changed['ready'] and 'Accepted answer changed: start-date-month-0' in changed['reason']
+    assert changed['digest']!=review['digest']
+    await page.locator('[id="start-date-month-0"]').evaluate("(e,value)=>e.parentElement.querySelector('.select__single-value').textContent=value",chosen)
+    assert (await adapter.review())['ready']
+    await page.locator('[id="'+checkbox+'"]').uncheck()
+    assert 'Accepted answer changed: '+checkbox in (await adapter.review())['reason']
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('ref',['employer.current','employment.title.current','experience.start'])
+async def test_employment_missing_facts_stay_pending(employment_gh,ref):
+    from core.easy_answers import AnswerBook
+    adapter,pdf,received,store,aid,page,state=employment_gh
+    path=adapter.data/'confirmed_facts.json';facts=json.loads(path.read_text())
+    facts['facts']=[f for f in facts['facts'] if f['id']!=ref];path.write_text(json.dumps(facts));adapter.book=AnswerBook(adapter.data)
+    with pytest.raises(SafetyError,match='Missing employment fact: '+ref):await adapter.run(pdf,'submit')
+    pending=json.loads((adapter.directory/'pending-answers.json').read_text())
+    assert any(p['reason']=='Missing employment fact: '+ref for p in pending)
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('current_role,reason',[(True,'End date required for a current role'),(False,'No checked current-role control')])
+async def test_employment_required_end_date_never_invented(employment_gh,current_role,reason):
+    adapter,pdf,received,store,aid,page,state=employment_gh
+    state.update(current_role=current_role,end_required=True)
+    with pytest.raises(SafetyError,match=reason):await adapter.run(pdf,'submit')
+    assert await page.locator('[id="end-date-year-0"]').input_value()==''
+    fields={f['id']:f for f in await adapter.inspect()}
+    assert fields['end-date-month-0']['value']==''
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('months',[['January'],['March','Março']])
+async def test_employment_missing_or_ambiguous_month_stays_pending(employment_gh,months):
+    adapter,pdf,received,store,aid,page,state=employment_gh;state['months']=months
+    with pytest.raises(SafetyError,match='Missing or ambiguous employment option'):await adapter.run(pdf,'submit')
+    assert not received and not store.submissions(aid)
+
+
+@pytest.mark.parametrize('required',[False,True])
+async def test_employment_extra_rows(employment_gh,required):
+    adapter,pdf,received,store,aid,page,state=employment_gh
+    state.update(extra_row=True,extra_required=required)
+    if required:
+        with pytest.raises(SafetyError,match='Only employment row 0 is supported'):await adapter.run(pdf,'submit')
+    else:
+        await adapter.run(pdf,'review');assert (await adapter.review())['ready']
+    assert await page.locator('[id="company-name-1"]').input_value()==''
+    assert not received and not store.submissions(aid)
+
+
+async def test_employment_review_blocks_newly_required_end_date_without_send(employment_gh):
+    adapter,pdf,received,store,aid,page,state=employment_gh
+    fill=adapter.fill
+    async def changed_after_fill():
+        await fill()
+        await page.locator('[id="end-date-year-0"]').evaluate("e=>{e.hidden=false;e.required=true;e.value='2025';}")
+    adapter.fill=changed_after_fill
+    with pytest.raises(SafetyError,match='End date required for a current role'):await adapter.run(pdf,'submit')
+    assert not received and not store.submissions(aid)
+
+
 async def test_hosted_form_redirected_to_employer_site_stops_without_send(hosted_gh):
     adapter,pdf,received,store,aid,page,state=hosted_gh
     # The employer's challenge page never initializes the Greenhouse uploader.
