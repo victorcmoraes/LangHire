@@ -359,6 +359,13 @@ class AnswerBook:
                 if len(choices)==1:return {'value':choices[0],'refs':['availability.immediate'],'source':'rule'}
                 if not field.get('options') and field['type'] in ('text','textarea'):
                     return {'value':'Imediato' if context.get('language')=='pt' else 'Immediately', 'refs':['availability.immediate'],'source':'rule'}
+        # Accommodation questions follow the confirmed accessibility fact; never a model narrative.
+        if re.search(r'acessibilidade|adaptac\w*|accommodat\w*|accessibility',q) and self.facts.get('accessibility',{}).get('value') is False:
+            if field.get('options'):
+                choices=[o['value'] for o in field['options'] if re.fullmatch(r'(?:nao|no|none|nenhum\w*|nao (?:preciso|necessito)\w*.*|i (?:do not|don t) need\w*.*)',normalized(o['text']))]
+                if len(choices)==1:return {'value':choices if field['type']=='checkbox-group' else choices[0],'refs':['accessibility'],'source':'rule'}
+            elif field['type'] in ('text','textarea'):
+                return {'value':'Não necessito de adaptações.' if context.get('language')=='pt' else 'I do not need any accommodations.','refs':['accessibility'],'source':'rule'}
         # A yes/no declaration of working English is the confirmed level, not an experience claim.
         if re.search(r'(?:able|capaz) (?:to )?(?:communicate|comunicar)\w*.{0,30}(?:english|ingles)',q) and normalized(str(self.facts.get('level.english',{}).get('value',''))) in ('proficient','advanced','fluent','native'):
             choices=[o['value'] for o in field.get('options',[]) if normalized(o['text']) in ('yes','sim')]

@@ -147,6 +147,17 @@ def test_confirmed_identity_and_language_are_scoped_and_do_not_claim_native_engl
     assert b.resolve(declaration,br)=={'value':'1','refs':['level.english'],'source':'rule'}
 
 
+def test_accommodation_questions_follow_the_accessibility_fact(tmp_path):
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[{'id':'accessibility','value':False,'source':'user'}]}))
+    b=AnswerBook(tmp_path);br={'url':'br-job','eligibility_country':'BR','form_language':'pt'}
+    text={'label':'Quais recursos ou adaptações podem contribuir para sua participação no processo seletivo?','type':'text','options':[]}
+    assert b.resolve(text,br)['value']=='Não necessito de adaptações.'
+    choice={'label':'Do you require any accommodations?','type':'select-one','options':[{'text':'Yes','value':'y'},{'text':'No','value':'n'}]}
+    assert b.resolve(choice,dict(br,form_language='en'))['value']=='n'
+    (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[]}))
+    assert 'pending' in AnswerBook(tmp_path).resolve(text,br)
+
+
 def test_profile_edits_replace_affected_facts_without_importing_untouched_defaults(tmp_path):
     book(tmp_path)
     sync_profile_facts(tmp_path,{'email':'test@example.invalid','years_of_experience':0},
