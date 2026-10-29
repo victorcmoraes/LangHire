@@ -482,7 +482,10 @@ class AnswerBook:
             'phone.countryCode': ('phone country code', 'country code', 'codigo do pais', 'codigo de pais', 'please select your country phone code'),
             'location.city': ('city', 'cidade', 'what city are you located in'), 'location.state': ('state', 'estado'),
             'url.linkedin': ('linkedin', 'linkedin profile', 'linkedin url', 'qual e o seu perfil do linkedin', 'qual o seu perfil do linkedin'),
-            'url.github': ('github', 'github url'), 'employer.current': (
+            'url.github': ('github', 'github url'),
+            'education.school': ('school', 'university', 'universidade', 'instituicao de ensino', 'which university did you graduate from',
+                                 'which university did you graduate from bachelor s', 'em qual universidade voce se formou'),
+            'employer.current': (
                 'current company', 'empresa atual', 'confirme o nome da empresa em que voce trabalha atualmente',
                 'where are you currently working please enter the full company name', 'where are you currently working',
                 'confirm the name of the company where you work',
