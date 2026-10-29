@@ -118,11 +118,18 @@ async def run_external(data,body,status):
     stop_file=data/'external/stop.json'
     def save_status():
         path=data/'external/run-state.json';temporary=path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8');temporary.replace(path)
+        temporary.write_text(json.dumps(status,ensure_ascii=False,default=str),encoding='utf-8')
+        for retry in range(20):
+            try:return temporary.replace(path)
+            except PermissionError:
+                if retry==19:raise
+                time.sleep(.05)
     async def watch():
         while True:
             if stop_file.exists():status['cancel_requested']=True
-            save_status()
+            # Windows refuses the replace while a reader holds the file; the next tick retries.
+            try:save_status()
+            except PermissionError:pass
             await asyncio.sleep(.5)
     watcher=None;lease_acquired=False
     try:

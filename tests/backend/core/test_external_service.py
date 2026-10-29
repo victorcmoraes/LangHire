@@ -16,6 +16,24 @@ def test_unlimited_budget_is_explicit_null_and_keeps_daily_counts(tmp_path):
     assert remaining_budget(AttemptStore(tmp_path))==3
 
 
+async def test_run_status_survives_a_reader_holding_the_file(tmp_path,monkeypatch):
+    from pathlib import Path
+    (tmp_path/'external').mkdir()
+    (tmp_path/'external/catalog.json').write_text(json.dumps({'jobs':[]}))
+    (tmp_path/'external/triage.json').write_text(json.dumps({'decisions':[]}))
+    (tmp_path/'jobs.json').write_text('{}')
+    real=Path.replace;calls=[]
+    def flaky(self,target):
+        calls.append(1)
+        # Windows denies the replace while another process reads run-state.json.
+        if self.name=='run-state.tmp' and len(calls)%3==1:raise PermissionError('reader holds the file')
+        return real(self,target)
+    monkeypatch.setattr(Path,'replace',flaky)
+    status={};body=SimpleNamespace(platform=None,job_url=None,job_urls=None,limit=None,execution='review')
+    await run_external(tmp_path,body,status)
+    assert json.loads((tmp_path/'external/run-state.json').read_text())['running'] is False
+
+
 def test_ready_preflight_prioritizes_a_fillable_job_without_bypassing_live_checks(tmp_path):
     from core.external_service import queue
     from core.application_safety import now
