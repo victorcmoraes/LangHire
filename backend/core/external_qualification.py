@@ -113,7 +113,10 @@ def qualify(job,facts,tracks=None):
                 return result('discarded','onsite_or_hybrid_outside_home_region',[location,hybrid[0] if hybrid else explicit_mode[0] if explicit_mode else location_onsite[0] if location_onsite else title_onsite[0] if title_onsite else job['workplaceType']]+quotes)
             return result('pending','working_arrangement_needs_evidence',[location]+quotes)
     country=job.get('country')
-    explicit_brazil=arrangement.get('brazil')=='allowed' or country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
+    # "Recife, PE; São Paulo, SP": every listed place carries a Brazilian state code.
+    places=[p.strip() for p in location.split(';') if p.strip()]
+    brazilian_states=bool(places) and all(re.fullmatch(r'[^,;]+,\s*(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)',p) for p in places)
+    explicit_brazil=brazilian_states or arrangement.get('brazil')=='allowed' or country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
     if not explicit_brazil:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)]+quotes)
     salary=job.get('salaryRange') or {}
     floor=facts.get('salary.minimumBrlMonthly',{}).get('value')

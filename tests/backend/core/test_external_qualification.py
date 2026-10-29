@@ -5,6 +5,13 @@ FACTS={'experience.years':{'value':3}}
 def job(description,**fields):
     return dict({'platform':'greenhouse','title':'Backend Engineer','location':'Brazil (Remote)','description':description},**fields)
 
+def test_brazilian_state_codes_establish_brazil_only_when_every_place_has_one():
+    facts=dict(FACTS,**{'location.commuteCities':{'value':['Recife']}})
+    assert qualify(job('Requirements:\nJava',location='Recife, PE'),facts)['state']=='eligible'
+    assert qualify(job('Requirements:\nJava',location='Recife, PE; São Paulo, SP'),facts)['state']=='eligible'
+    assert qualify(job('Requirements:\nJava',location='Recife, PE; Lima'),facts)['reason']=='geographic_eligibility_needs_evidence'
+    assert qualify(job('Requirements:\nJava',location='Recife'),facts)['reason']=='geographic_eligibility_needs_evidence'
+
 def test_team_tenure_and_desired_experience_do_not_become_mandatory_duration():
     description='Our team has engineers with more than 10 years of experience.\nWork Experience:\n3+ years as a backend developer\nMust-Have Experience:\nJava and REST APIs\nNice-to-Have Experience:\n5 years of experience with Go'
     assert qualify(job(description),FACTS)['state']=='eligible'
