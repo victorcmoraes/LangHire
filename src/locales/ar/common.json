@@ -10,7 +10,8 @@
     "qa": "أسئلة وأجوبة",
     "logs": "السجلات",
     "settings": "الإعدادات",
-    "feedback": "التعليقات"
+    "feedback": "التعليقات",
+    "pipeline": "Pipeline"
   },
   "app": {
     "title": "LangHire",

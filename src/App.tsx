@@ -11,6 +11,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { Wand2, Loader2 } from "lucide-react";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Pipeline = lazy(() => import("./pages/Pipeline"));
 const Analytics = lazy(() => import("./pages/Analytics"));
 const Profile = lazy(() => import("./pages/Profile"));
 const LLMSettings = lazy(() => import("./pages/LLMSettings"));
@@ -114,6 +115,7 @@ export default function App() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/pipeline" element={<Pipeline />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/llm" element={<LLMSettings />} />

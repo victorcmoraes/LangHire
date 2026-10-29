@@ -11,7 +11,8 @@
     "logs": "Registri",
     "settings": "Impostazioni",
     "feedback": "Feedback",
-    "analytics": "Analisi"
+    "analytics": "Analisi",
+    "pipeline": "Pipeline"
   },
   "app": {
     "title": "LangHire",

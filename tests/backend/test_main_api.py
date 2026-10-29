@@ -754,3 +754,15 @@ class TestNotFound:
         body = resp.json()
         assert body["success"] is False
         assert body["models"] == []
+
+class TestPipeline:
+    def test_pipeline_requires_auth(self, client):
+        assert client.get('/pipeline').status_code==401
+
+    def test_pipeline_empty_snapshot_is_read_only(self, auth_client,data_dir):
+        before={p:p.read_bytes() for p in data_dir.rglob('*') if p.is_file()}
+        response=auth_client.get('/pipeline')
+        assert response.status_code==200
+        assert response.json()['totals']['collected']==0
+        assert response.json()['sankey']=={'nodes':[],'links':[]}
+        assert before=={p:p.read_bytes() for p in data_dir.rglob('*') if p.is_file()}

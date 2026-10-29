@@ -355,3 +355,17 @@ export interface RunWithLogs extends RunMetric {
   run_id: string | null;
   log_count: number;
 }
+export interface PipelineJob {
+  job_key: string; title: string; company: string; board: string; url: string;
+  platform: string; location: string; collected_at: string; source: string;
+  triage: { state: string; recorded_state?: string; reason: string; bucket: string; evidence: string[] };
+  attempts: { id: string; state: string; message: string; created_at: string; updated_at: string; send_intent: boolean }[];
+  application_status: string;
+  outcome: { stage: string; reply_at: string; ambiguous: boolean };
+  last_update: string; path: string[];
+}
+export interface PipelineData {
+  generated_at: string; jobs: PipelineJob[];
+  totals: { collected: number; eligible: number; sent: number; confirmed: number; advanced: number };
+  sankey: { nodes: { id: string; label: string; stage: number }[]; links: { source: string; target: string; value: number }[] };
+}

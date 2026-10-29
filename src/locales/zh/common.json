@@ -11,7 +11,8 @@
     "logs": "日志",
     "settings": "设置",
     "feedback": "反馈",
-    "analytics": "分析"
+    "analytics": "分析",
+    "pipeline": "Pipeline"
   },
   "app": {
     "title": "LangHire",

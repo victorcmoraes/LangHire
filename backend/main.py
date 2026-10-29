@@ -1555,6 +1555,12 @@ async def complete_onboarding():
 
 
 # ── Metrics / Dashboard ───────────────────────────────────────────────────
+@app.get("/pipeline")
+def get_pipeline():
+    from core.pipeline import read_pipeline
+    return read_pipeline(get_data_dir())
+
+
 @app.get("/dashboard")
 async def get_dashboard():
     stats = await get_job_stats()

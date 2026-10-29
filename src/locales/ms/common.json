@@ -10,7 +10,8 @@
     "qa": "Soal Jawab",
     "logs": "Log",
     "settings": "Tetapan",
-    "feedback": "Maklum Balas"
+    "feedback": "Maklum Balas",
+    "pipeline": "Pipeline"
   },
   "app": {
     "title": "LangHire",

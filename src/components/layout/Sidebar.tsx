@@ -13,11 +13,13 @@ import {
   MessageSquare,
   HelpCircle,
   BarChart3,
+  GitBranch,
 } from "lucide-react";
 import { checkHealth } from "../../lib/api";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, labelKey: "nav.dashboard" },
+  { to: "/pipeline", icon: GitBranch, labelKey: "nav.pipeline" },
   { to: "/analytics", icon: BarChart3, labelKey: "nav.analytics" },
   { to: "/guide", icon: BookOpen, labelKey: "nav.guide" },
   { to: "/profile", icon: User, labelKey: "nav.profile" },

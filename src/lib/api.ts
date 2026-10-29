@@ -453,3 +453,5 @@ export async function reloadPlugins() {
   return request<{ success: boolean; count: number }>("/plugins/reload", { method: "POST" });
 }
 
+
+export const getPipeline = () => request<import("./types").PipelineData>("/pipeline");

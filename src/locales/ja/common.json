@@ -10,7 +10,8 @@
     "qa": "Q&A",
     "logs": "ログ",
     "settings": "設定",
-    "feedback": "フィードバック"
+    "feedback": "フィードバック",
+    "pipeline": "Pipeline"
   },
   "app": {
     "title": "LangHire",
