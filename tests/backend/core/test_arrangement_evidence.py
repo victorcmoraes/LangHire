@@ -83,6 +83,20 @@ def test_verified_remote_and_brazil_make_eligible(quote):
     assert quote in result['evidence']
 
 
+def test_company_history_mentioning_brazil_is_not_eligibility():
+    quote='Somos a maior empresa independente de meios de pagamentos do Brasil, com milhares de pessoas'
+    posting=job(quote+'.',location='Remoto')
+    assert verified(posting,entry(posting,brazil='allowed',brazil_quote=quote))['brazil']=='unknown'
+    assert decision(posting,entry(posting,brazil='allowed',brazil_quote=quote))['state']=='pending'
+
+
+@pytest.mark.parametrize('quote',['Auxílio home office * (apenas para contratos Híbridos ou Remotos)','Contratos Híbridos ou Remotos'])
+def test_hybrid_or_remote_contract_policy_does_not_discard_remote_location(quote):
+    posting=job('Nosso pacote de Remuneração e Benefícios:\n'+quote+'\nOutro item',location='Remoto')
+    assert verified(posting,entry(posting,'hybrid',quote))['mode']=='unknown'
+    assert decision(posting,entry(posting,'hybrid',quote))['reason']=='geographic_eligibility_needs_evidence'
+
+
 def test_remote_first_flexibility_policy_is_remote_evidence():
     quote='Atuamos no modelo remote-first, oferecendo total flexibilidade para você trabalhar de qualquer lugar do Brasil'
     posting=job('Localização e Modelo de Trabalho\n'+quote+'.',location='São Paulo, Brazil')

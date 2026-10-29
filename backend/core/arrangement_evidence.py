@@ -26,6 +26,11 @@ OFFICE=r'h[íi]brid|hÃ­brid|hybrid|presencial|on[- ]?site|in[- ]office|office 
 CAUTION=r'occasional|ocasional|eventual|benefit|benef[íi]cio|benefÃ­cio|perk|home office day|\bnot\b|\bnão\b|\bnao\b'
 REGION=r'\b(?:brazil|brasil|latam|latin america|am[ée]rica latina|amÃ©rica latina|south america)\b'
 EXCLUSION=r'exclud(?:ing|ed)|except|not available|\bonly\b|apenas|exceto|exclu[íi]d|excluindo'
+# A country named in company history is not eligibility; the quote must say who may work from where.
+ELIGIBILITY=r'anywhere in|qualquer (?:lugar|local|regi[ãa]o)|based (?:in|anywhere)|located (?:in|anywhere)|resid\w*|live (?:in|anywhere)|morar|open to|eligible|hiring (?:in|from|across)|candidates (?:in|from)|applicants (?:in|from)|within|work from|trabalhar (?:de|em|a partir)|todo o (?:brasil|territ)|remot\w* (?:in|from|em|no|na|para)'
+# Allowances and "hybrid or remote" contracts describe policies, not this job's arrangement.
+POLICY=r'aux[íi]lio|allowance|stipend|reimburs|reembols|h[íi]brid\w* ou remot|hybrid or remote|remot\w* ou h[íi]brid|remote or hybrid'
+BENEFITS_HEADING=r'^\s*\W{0,3}\s*(?:nosso pacote|our|what we offer|o que oferecemos)?[^:\n]{0,40}\b(?:benefits|benef[íi]cios|perks)\b[^:\n]{0,30}:?\s*$'
 
 
 def description_hash(job):
@@ -58,7 +63,7 @@ def verified(job,entry):
         start=description.find(text);offset=0;benefits=False;blocked=False
         lines=job.get('description','').splitlines()
         for line in lines:
-            if re.match(r'^\s*(?:benefits|benef[íi]cios|perks)\s*:?\s*$',line,re.I):benefits=True
+            if len(line.strip())<90 and re.match(BENEFITS_HEADING,line,re.I):benefits=True
             elif re.match(r'^\s*(?:requirements|requisitos|work (?:type|arrangement)|modalidade|location)\s*(?::|$)',line,re.I):benefits=False
             content=collapsed(line)
             if not content:continue
@@ -68,13 +73,14 @@ def verified(job,entry):
         end=description.find('.',start+len(text)-1);context=description[left:end if end!=-1 else len(description)]
         if blocked:continue
         if part=='mode':
-            if re.search(CAUTION,text,re.I) or re.search(r'\b(?:not|never|não|nao)\b.{0,30}(?:'+REMOTE+')',context,re.I):continue
+            if re.search(CAUTION+'|'+POLICY,text,re.I) or re.search(r'\b(?:not|never|não|nao)\b.{0,30}(?:'+REMOTE+')',context,re.I):continue
             if value=='remote' and re.search(REMOTE,text,re.I) and not re.search(OFFICE+'|'+CAUTION,context,re.I):
                 result.update(mode=value,mode_quote=quote)
             elif value in ('hybrid','onsite') and re.search(OFFICE,text,re.I):result.update(mode=value,mode_quote=quote)
         elif re.search(REGION,text,re.I) and not re.search(r'benefit|perk|offices?|history',text,re.I):
             exclusion=re.search(EXCLUSION,text,re.I)
-            if value=='allowed' and not exclusion and not re.search(r'\bnot\b',text):result.update(brazil=value,brazil_quote=quote)
+            if value=='allowed' and not exclusion and not re.search(r'\bnot\b',text) and re.search(ELIGIBILITY,text,re.I):
+                result.update(brazil=value,brazil_quote=quote)
             elif value=='excluded' and exclusion and re.search(r'\b(?:brazil|brasil|latam)\b',text,re.I):
                 # "LATAM except Mexico" still permits Brazil; bind exclusion to its target.
                 if re.search(r'(?:exclud\w*|except|not available|exceto|excluindo)\s+(?:(?:candidates|applicants|residents)\s+)?(?:(?:in|for|from|o|no)\s+)?(?:brazil|brasil|latam)\b|\b(?:brazil|brasil|latam)\s+(?:is |are )?(?:excluded|not available)|\b(?:only|apenas)\s+(?:in |em )?(?:the )?(?:us\b|usa\b|united states|canada|canadá|uk\b|united kingdom|portugal|argentina|mexico|méxico|chile|colombia)',text,re.I):
