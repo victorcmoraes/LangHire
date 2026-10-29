@@ -6,10 +6,16 @@ The backend modules import each other with a `backend/`-rooted style
 We also isolate every test from the real OS app-data directory by pointing
 HOME at a per-test temporary directory.
 """
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# The fork's launcher exports LANGHIRE_DATA_DIR to the real .local data. A test
+# run inheriting it once overwrote the candidate's settings and facts, so it is
+# dropped before any backend module computes its data directory.
+os.environ.pop("LANGHIRE_DATA_DIR", None)
 
 # ── Make `backend/` importable as a top-level package root ──────────────────
 # Modules do `from core.config import ...`, so the *backend* dir must be on path.
@@ -18,6 +24,11 @@ BACKEND = ROOT / "backend"
 for p in (str(ROOT), str(BACKEND)):
     if p not in sys.path:
         sys.path.insert(0, p)
+
+
+@pytest.fixture(autouse=True)
+def no_real_data_dir(monkeypatch):
+    monkeypatch.delenv("LANGHIRE_DATA_DIR", raising=False)
 
 
 @pytest.fixture
