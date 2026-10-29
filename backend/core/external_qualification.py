@@ -93,7 +93,8 @@ def qualify(job,facts,tracks=None):
     # Benefits that mention occasional remote work are not a job's arrangement.
     explicit_mode=re.search(r'(?:work\s*type|\bmode|modalidade|modelo(?: de (?:trabalho|atua[çc][ãa]o))?)\s*:\s*(remot[eo]|hybrid|h[íi]brid[oa]|on.?site|presencial)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
-    metadata_remote=job.get('platform',job.get('source'))=='lever' and job.get('workplaceType')=='remote'
+    # LinkedIn's #LI-Remote line is the recruiter's workplace tag, like Lever's workplaceType.
+    metadata_remote=(job.get('platform',job.get('source'))=='lever' and job.get('workplaceType')=='remote') or bool(re.search(r'^\s*#LI-Remote\b\W*$',description,re.I|re.M))
     # A stated location policy is evidence; a generic country mention or
     # occasional remote-work benefit is not.
     home_policy=re.search(r'(?:can|may) (?:live|work) anywhere in (?:Brazil|Brasil)|(?:pode\w*|possibilidade de) (?:morar|trabalhar) (?:de |em )?qualquer (?:lugar|local) (?:do |no )?Brasil',description,re.I)

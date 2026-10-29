@@ -97,6 +97,18 @@ def test_hybrid_or_remote_contract_policy_does_not_discard_remote_location(quote
     assert decision(posting,entry(posting,'hybrid',quote))['reason']=='geographic_eligibility_needs_evidence'
 
 
+@pytest.mark.parametrize('tag,state',[('#LI-Remote','eligible'),('#LI-Hybrid','pending'),('Our #LI-Remote culture','pending')])
+def test_linkedin_remote_tag_line_is_workplace_metadata(tag,state):
+    posting=job('Requirements:\nPython\n'+tag,location='Brazil')
+    assert qualify(posting,{})['state']==state
+
+
+def test_brazilian_city_eligibility_quote_allows_brazil():
+    quote='Based in any Brazilian city'
+    posting=job('This role is fully remote.\n'+quote+'.',location='Remote')
+    assert decision(posting,entry(posting,'remote','This role is fully remote.','allowed',quote))['state']=='eligible'
+
+
 def test_remote_first_flexibility_policy_is_remote_evidence():
     quote='Atuamos no modelo remote-first, oferecendo total flexibilidade para você trabalhar de qualquer lugar do Brasil'
     posting=job('Localização e Modelo de Trabalho\n'+quote+'.',location='São Paulo, Brazil')

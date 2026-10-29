@@ -24,7 +24,7 @@ REMOTE=r'100%\s*remot|fully remote|totalmente remot|remote[- ]first|modelo remot
 OFFICE=r'h[íi]brid|hÃ­brid|hybrid|presencial|on[- ]?site|in[- ]office|office days|dias no escrit[óo]rio|\d+\s*(?:days?|vezes|x)\s*(?:(?:per|a|por|na)\s*)?(?:week|semana)'
 # "Flexibility" alone describes remote-first policies; flexible hybrids match OFFICE.
 CAUTION=r'occasional|ocasional|eventual|benefit|benef[íi]cio|benefÃ­cio|perk|home office day|\bnot\b|\bnão\b|\bnao\b'
-REGION=r'\b(?:brazil|brasil|latam|latin america|am[ée]rica latina|amÃ©rica latina|south america)\b'
+REGION=r'\b(?:brazil|brazilian|brasil|brasileir[oa]s?|latam|latin america|am[ée]rica latina|amÃ©rica latina|south america)\b'
 EXCLUSION=r'exclud(?:ing|ed)|except|not available|\bonly\b|apenas|exceto|exclu[íi]d|excluindo'
 # A country named in company history is not eligibility; the quote must say who may work from where.
 ELIGIBILITY=r'anywhere in|qualquer (?:lugar|local|regi[ãa]o)|based (?:in|anywhere)|located (?:in|anywhere)|resid\w*|live (?:in|anywhere)|morar|open to|eligible|hiring (?:in|from|across)|candidates (?:in|from)|applicants (?:in|from)|within|work from|trabalhar (?:de|em|a partir)|todo o (?:brasil|territ)|remot\w* (?:in|from|em|no|na|para)'
