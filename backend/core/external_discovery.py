@@ -10,6 +10,7 @@ import uuid
 import urllib.request
 from filelock import FileLock
 
+from .cornerstone import board_parts,url_parts
 from .application_safety import SafetyError,now,job_key
 from .external_catalog import refresh_board,identity,lever_job
 from .external_qualification import home_cities,qualify,triage
@@ -26,10 +27,18 @@ def board_spec(value):
             raise SafetyError('Use an official HTTPS job-board URL')
         platform={'jobs.lever.co':'lever','job-boards.greenhouse.io':'greenhouse','boards.greenhouse.io':'greenhouse','jobs.ashbyhq.com':'ashby'}.get(p.hostname)
         board=p.path.strip('/').split('/')[0]
+        try:cornerstone=url_parts(value)
+        except ValueError as error:raise SafetyError('Invalid public ATS board') from error
+        if cornerstone:
+            tenant,site=cornerstone;platform='cornerstone';board=tenant+('/'+str(site) if site!=1 else '')
     else:
         parts=value.split(':',1)
-        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company, lever:company or ashby:company')
+        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company, lever:company, ashby:company or cornerstone:tenant/siteId')
         platform,board=parts
+    if platform=='cornerstone':
+        try:tenant,site=board_parts(board)
+        except ValueError as error:raise SafetyError('Invalid public ATS board') from error
+        return {'platform':platform,'board':tenant+('/'+str(site) if site!=1 else '')}
     if platform not in ('lever','greenhouse','ashby') or not isinstance(board,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}',board):
         raise SafetyError('Invalid public ATS board')
     return {'platform':platform,'board':board}
@@ -52,6 +61,7 @@ def load_boards(data,extra=()):
 def candidate_location(job,cities=()):
     """Discovery may include ambiguous regional jobs; qualification must still prove eligibility."""
     places=[r'\bBrazil\b',r'\bBrasil\b',r'\bLATAM\b','Latin America',*(r'\b'+re.escape(c)+r'\b' for c in cities)]
+    if job.get('platform')=='cornerstone' and re.search(r', (?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)(?:;|$)',job.get('location','')):return True
     return job.get('country')=='BR' or bool(re.search('|'.join(places),job.get('location',''),re.I))
 
 

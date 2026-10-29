@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 import urllib.request
+from .cornerstone import board_parts,job_url
 
 
 class Text(HTMLParser):
@@ -51,7 +52,52 @@ def ashby_job(item,board):
             'workplaceType':mode,'secondaryLocations':item.get('secondaryLocations',[]),'address':item.get('address')}
 
 
+def cornerstone_job(item,board):
+    tenant,site=board_parts(board)
+    locations=[', '.join(str(place.get(k) or '').strip().title() if k=='city' else str(place.get(k) or '').strip()
+                         for k in ('city','state') if place.get(k)) for place in item.get('locations',[])]
+    return {'platform':'cornerstone','source':'cornerstone','board':board,'company':tenant,
+            'externalId':str(item['requisitionId']),'title':item['displayJobTitle'],
+            'url':job_url(tenant,site,item['requisitionId']),'location':'; '.join(dict.fromkeys(p for p in locations if p)),
+            'description':plain(item.get('externalDescription','')),
+            'postingEffectiveDate':item.get('postingEffectiveDate'),'postingExpirationDate':item.get('postingExpirationDate')}
+
+
+def cornerstone_jobs(board):
+    tenant,site=board_parts(board)
+    headers={'User-Agent':'LangHire-local-job-catalog/1.0','Accept':'application/json'}
+    req=urllib.request.Request(f'https://{tenant}.csod.com/ux/ats/careersite/{site}/home?c={tenant}',headers=headers)
+    with urllib.request.urlopen(req,timeout=40) as response:html=unescape(response.read().decode('utf-8'))
+    context={}
+    for key in ('token','cloud'):
+        match=re.search(r'"'+key+r'"\s*:\s*("(?:[^"\\]|\\.)*")',html)
+        if not match:raise ValueError('Missing public Cornerstone context')
+        context[key]=json.loads(match[1])
+    # Only send the anonymous token to an official regional API host.
+    cloud=urlsplit(context['cloud'])
+    if (cloud.scheme!='https' or not re.fullmatch(r'[a-z0-9-]+\.api\.csod\.com',cloud.hostname or '')
+            or cloud.port not in (None,443) or cloud.username or cloud.password or cloud.path not in ('','/') or cloud.query or cloud.fragment):
+        raise ValueError('Invalid public Cornerstone cloud')
+    if not context['token']:raise ValueError('Missing public Cornerstone token')
+    headers.update(Authorization='Bearer '+context['token'],**{'Content-Type':'application/json'})
+    result=[];seen=set();page=1
+    while True:
+        body={'careerSiteId':site,'careerSitePageId':site,'pageNumber':page,'pageSize':100,'cultureId':12,
+              'searchText':'','cultureName':'pt-BR','states':[],'countryCodes':[],'cities':[],'placeID':'',
+              'radius':None,'postingsWithinDays':None,'customFieldCheckboxKeys':[],'customFieldDropdowns':[],'customFieldRadios':[]}
+        req=urllib.request.Request(context['cloud'].rstrip('/')+'/rec-job-search/external/jobs',data=json.dumps(body).encode(),headers=headers)
+        with urllib.request.urlopen(req,timeout=40) as response:data=json.load(response)['data']
+        rows=data['requisitions'];fresh=[item for item in rows if str(item['requisitionId']) not in seen]
+        for item in fresh:
+            seen.add(str(item['requisitionId']));result.append(cornerstone_job(item,board))
+        if len(seen)>=data['totalCount']:return result
+        # Incomplete pages must not declare missing jobs closed.
+        if not fresh:raise ValueError('Incomplete public Cornerstone pagination')
+        page+=1
+
+
 def refresh_board(platform,board):
+    if platform=='cornerstone':return cornerstone_jobs(board)
     url=(f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true' if platform=='greenhouse'
          else f'https://api.ashbyhq.com/posting-api/job-board/{board}' if platform=='ashby'
          else f'https://api.lever.co/v0/postings/{board}?mode=json')
@@ -98,7 +144,7 @@ def merge_filtered_jobgether(data_dir):
 
 def refresh_imported(data_dir):
     data_dir=Path(data_dir);jobs=json.loads((data_dir/'jobs.json').read_text(encoding='utf-8'))
-    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby')}
+    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone')}
     boards=sorted({(key[0],key[1]) for key in previous if key[1]})
     result={'imported_unique':len(previous),'boards':[],'jobs':[]}
     with ThreadPoolExecutor(max_workers=3) as pool:

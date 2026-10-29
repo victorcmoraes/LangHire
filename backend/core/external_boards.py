@@ -16,7 +16,7 @@ from .external_qualification import home_cities,qualify
 from .job_tracks import load_job_tracks,matches_track
 
 
-LINK=re.compile(r'https://(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com)/[A-Za-z0-9][A-Za-z0-9_-]{0,99}(?=[/\s?\"<>]|$)',re.I)
+LINK=re.compile(r'https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.csod\.com/ux/ats/careersite/[1-9][0-9]{0,9}(?=[/\s?\"<>]|$)(?:/[^\s\"<>]*)?(?:\?[^\s\"<>]*)?|(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com)/[A-Za-z0-9][A-Za-z0-9_-]{0,99}(?=[/\s?\"<>]|$))',re.I)
 CACHE_SECONDS=86400
 
 
@@ -58,7 +58,7 @@ def board_candidates(data,seeds=None):
 
 def validate_board(data,board):
     data=Path(data);spec=board_spec(board);root=data/'external/board-cache';root.mkdir(parents=True,exist_ok=True)
-    path=root/(spec['platform']+'-'+spec['board'].lower()+'.json')
+    path=root/(spec['platform']+'-'+spec['board'].lower().replace('/','_')+'.json')
     # Share cached successes and failures across suggestion/add runs and processes.
     with FileLock(str(path.with_suffix('.lock')),timeout=0):
         cached=json.loads(path.read_text(encoding='utf-8')) if path.exists() else None
