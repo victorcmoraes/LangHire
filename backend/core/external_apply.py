@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 from contextlib import asynccontextmanager
 
 from filelock import FileLock
+from .cornerstone import job_parts,job_url
 from .application_safety import AttemptStore, SafetyError, ACTIVE, job_key
 from .browser_runtime import persistent_browser
 from .easy_answers import AnswerBook, normalized, digest, damaged_text
@@ -45,6 +46,9 @@ FIELDS=r'''root=>{
 
 
 def canonical_ats(url):
+    try:cornerstone=job_parts(url)
+    except ValueError as error:raise SafetyError(str(error)) from error
+    if cornerstone:return job_url(*cornerstone)
     p=urlsplit(url);host=p.hostname or ''
     if p.scheme!='https':raise SafetyError('Hosted ATS must use HTTPS')
     if host in ('jobs.lever.co','jobs.eu.lever.co') and re.fullmatch(r'/[\w-]+/[0-9a-f-]{36}(?:/apply)?/?',p.path,re.I):

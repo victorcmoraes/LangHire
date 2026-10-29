@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from .cornerstone import job_parts
 
 ACTIVE = ("running", "awaiting_human", "submitted")
 PROTECTED = (*ACTIVE, "uncertain", "confirmed")
@@ -24,6 +25,9 @@ class SafetyError(RuntimeError):
 
 
 def job_key(url):
+    try:cornerstone=job_parts(url)
+    except ValueError as error:raise SafetyError(str(error)) from error
+    if cornerstone:return 'cornerstone:'+':'.join(map(str,cornerstone))
     parsed=urlsplit(url)
     host=(parsed.hostname or '').lower().removeprefix('www.')
     match=re.fullmatch(r'/jobs/view/(\d+)/?',parsed.path)

@@ -2,7 +2,7 @@
 
 Run `.venv\Scripts\python.exe -m cli.external boards suggest` to inspect candidates
 without changing the registry or collecting jobs. The command reads official
-Greenhouse, Lever and Ashby links stored in LinkedIn/Jobgether records and optional
+Greenhouse, Lever, Ashby and Cornerstone links stored in LinkedIn/Jobgether records and optional
 seeds in the data directory's `external/board-seeds.txt`.
 
 Seeds accept one `platform:slug` or official HTTPS board URL per line. Blank lines
@@ -44,3 +44,12 @@ the documented public Job Postings API at
 `https://api.ashbyhq.com/posting-api/job-board/{board}` and excludes unlisted jobs.
 Ashby jobs serve as a manual queue; applications are not supported and these jobs
 are excluded from automated runs and batches.
+
+Cornerstone collection accepts `cornerstone:example-company` (site 1),
+`cornerstone:example-company/2`, or official
+`https://example-company.csod.com/ux/ats/careersite/2/home?c=example-company`
+URLs. It reads the public page's anonymous token and regional cloud URL, then
+pages only the public `rec-job-search/external/jobs` search endpoint. Collection
+is read-only; applications are manual and Cornerstone jobs are excluded from
+automated queues and runs. Board validation uses the same cache and human review
+handling for HTTP 401, 403 and 429 as other public boards.
