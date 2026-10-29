@@ -230,8 +230,11 @@ async def education_gh(hosted_gh):
         'education.start':'2022-01-01','education.end':'2026-07-01'}.items()]
     path.write_text(json.dumps(facts));adapter.book=AnswerBook(adapter.data)
     async def schools(route):
+        # Like Greenhouse's catalog search, only names containing the typed term are returned.
+        from urllib.parse import parse_qs,urlsplit
+        term=parse_qs(urlsplit(route.request.url).query).get('q',[''])[0].lower()
         await asyncio.sleep(.05)
-        await route.fulfill(content_type='application/json',body=json.dumps(state['schools']))
+        await route.fulfill(content_type='application/json',body=json.dumps([s for s in state['schools'] if term in s.lower()]))
     await page.context.route('**/education-schools?*',schools)
     fill=adapter.fill
     async def fill_education():
@@ -277,7 +280,7 @@ async def education_gh(hosted_gh):
 async def test_education_exact_school_or_other_never_fuzzy(education_gh,schools,chosen):
     adapter,pdf,received,store,aid,page,state=education_gh;state['schools']=schools
     if chosen is None:
-        with pytest.raises(SafetyError,match='Missing or ambiguous education option'):await adapter.run(pdf,'submit')
+        with pytest.raises(SafetyError,match='education option'):await adapter.run(pdf,'submit')
         assert await page.locator('[id="school--0"]').evaluate("e=>e.parentElement.querySelector('.select__single-value').textContent")==''
         pending=json.loads((adapter.directory/'pending-answers.json').read_text())
         assert len(pending)==1 and 'education option' in pending[0]['reason']

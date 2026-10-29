@@ -183,14 +183,24 @@ class GreenhouseAdapter:
                      if normalized(fact).startswith(prefix)),None) if kind=='degree' else None
         if kind=='degree' and not family:return pending('Unsupported education.degree level')
         target=self.target(field['id']);options=field['options']
-        if field['render']=='combobox':
-            await target.click();await target.fill(value if kind=='school' else '')
+        async def listed(term):
+            await target.click();await target.fill(term)
             controls=await target.get_attribute('aria-controls')
-            choices=self.target(controls).get_by_role('option') if controls else self.page.locator('[role=option]:visible')
-            try:await choices.first.wait_for(state='visible',timeout=15000)
-            except PlaywrightTimeoutError:
+            found=self.target(controls).get_by_role('option') if controls else self.page.locator('[role=option]:visible')
+            # An empty search renders "No options" text rather than option elements.
+            try:await found.first.wait_for(state='visible',timeout=8000)
+            except PlaywrightTimeoutError:return found,[]
+            return found,[{'text':text,'value':text} for text in await found.all_text_contents()]
+        if field['render']=='combobox':
+            choices,options=await listed(value if kind=='school' else '')
+            # Schools missing from the catalog fall back to its exact "Other" entry, never a similar name.
+            if kind=='school' and not any(normalized(o['text'])==normalized(value) for o in options):
+                for term in ('Other','Outra'):
+                    choices,options=await listed(term)
+                    options=[o for o in options if normalized(o['text']) in ('other','outra','outro')]
+                    if options:break
+            if not options:
                 await target.press('Escape');return pending('No education options: '+field['label'])
-            options=[{'text':text,'value':text} for text in await choices.all_text_contents()]
         if options:
             def date_option(option):
                 if '-' not in kind:return False
