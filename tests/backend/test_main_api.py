@@ -31,6 +31,32 @@ TOKEN = main._API_TOKEN
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
+class TestEasyApplyBoundary:
+    def test_external_mode_disabled(self, auth_client,monkeypatch):
+        monkeypatch.setattr(main,'_apply_status',{'running':False})
+        assert auth_client.post('/apply/start',json={'mode':'external'}).status_code==409
+
+    def test_submit_requires_matching_review_and_three_distinct_jobs(self, auth_client,monkeypatch):
+        monkeypatch.setattr(main,'_apply_status',{'running':False})
+        monkeypatch.setattr(main,'_collection_status',{'running':False})
+        monkeypatch.setattr(main,'_login_running',False)
+        r=auth_client.post('/apply/start',json={'mode':'easy','execution':'submit','job_url':'https://www.linkedin.com/jobs/view/123/','review_id':'unknown'})
+        assert r.status_code==409
+
+    def test_review_default_never_requires_global_submission_enable(self, auth_client,monkeypatch):
+        monkeypatch.setattr(main,'_apply_status',{'running':False})
+        monkeypatch.setattr(main,'_collection_status',{'running':False})
+        monkeypatch.setattr(main,'_login_running',False)
+        monkeypatch.setattr(main,'_run_async_in_thread',lambda factory,status:None)
+        r=auth_client.post('/apply/start',json={'mode':'easy','job_url':'https://www.linkedin.com/jobs/view/123/'})
+        assert r.status_code==200
+        assert main._apply_status['execution']=='review'
+
+    def test_easy_endpoints_still_require_auth(self, client):
+        assert client.get('/easy/answers').status_code==401
+        assert client.get('/easy/reviews').status_code==401
+
+
 # ── Fixtures ────────────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 def _isolate_state(data_dir, monkeypatch):
@@ -309,6 +335,14 @@ class TestPlugins:
 
 # ── Jobs (CRUD over jobs.json in tmp data dir) ────────────────────────────────
 class TestJobs:
+    def test_uncertain_job_cannot_be_reset_and_resent(self, auth_client):
+        import core.shared_config as config
+        url = "https://jobs.lever.co/acme/uncertain"
+        config.write_jobs({url: {"url": url, "status": "uncertain"}})
+        result = auth_client.put("/jobs/status", json={"url": url, "status": "pending"})
+        assert result.status_code == 409
+        assert config.read_jobs()[url]["status"] == "uncertain"
+
     def test_jobs_empty(self, auth_client):
         """A fresh data dir has no jobs."""
         assert auth_client.get("/jobs").json() == []
@@ -517,6 +551,40 @@ class TestSetup:
 
 # ── Status endpoints for the long-running workers (no work triggered) ─────────
 class TestWorkerStatus:
+    def test_human_confirmation_is_not_an_application_receipt(self, auth_client, data_dir):
+        from backend.core.application_safety import AttemptStore
+        store = AttemptStore(data_dir)
+        attempt = store.begin("https://jobs.lever.co/acme/one")
+        store.transition(attempt, "awaiting_human", "captcha")
+        holds = auth_client.get("/apply/interventions").json()
+        assert holds[0]["id"] == attempt
+        result = auth_client.post(f"/apply/interventions/{attempt}/confirm")
+        assert result.status_code == 200
+        assert store.get(attempt)["state"] == "awaiting_human"
+        assert store.submissions(attempt) == []
+
+    def test_recovery_replays_persisted_confirmation_without_resending(self, auth_client, data_dir):
+        import core.shared_config as config
+        from backend.core.application_safety import AttemptStore
+        url = "https://jobs.lever.co/acme/one"
+        store = AttemptStore(data_dir)
+        attempt = store.begin(url)
+        store.transition(attempt, "confirmed", "independent receipt saved before crash")
+        config.write_jobs({url: {"url": url, "status": "in_progress"}})
+        main._recover_stale_jobs()
+        assert config.read_jobs()[url]["status"] == "applied"
+        assert config.read_jobs()[url]["attempt_id"] == attempt
+
+    def test_recovery_does_not_touch_a_live_held_worker(self, auth_client, data_dir):
+        from filelock import FileLock
+        from backend.core.application_safety import AttemptStore
+        store = AttemptStore(data_dir)
+        attempt = store.begin("https://jobs.lever.co/acme/one")
+        store.transition(attempt, "awaiting_human", "captcha")
+        with FileLock(str(data_dir / "application-worker.lock")):
+            main._recover_stale_jobs()
+        assert store.get(attempt)["state"] == "awaiting_human"
+
     def test_collection_status_idle(self, auth_client):
         body = auth_client.get("/jobs/collect/status").json()
         assert body["running"] is False

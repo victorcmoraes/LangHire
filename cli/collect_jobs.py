@@ -322,6 +322,12 @@ async def collect_descriptions(jobs: dict):
 
 
 async def main():
+    from filelock import FileLock
+    with FileLock(str(config.DATA_DIR / "application-worker.lock"), timeout=0):
+        await _main()
+
+
+async def _main():
     parser = argparse.ArgumentParser(description="Collect LinkedIn job listings")
     parser.add_argument("--title", help="Collect for a single job title")
     parser.add_argument("--resume", action="store_true", help="Skip titles already collected")

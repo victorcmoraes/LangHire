@@ -7,7 +7,9 @@ struct Backend(Mutex<Option<CommandChild>>);
 
 #[tauri::command]
 fn get_api_token() -> Result<String, String> {
-    let base = if cfg!(target_os = "macos") {
+    let base = if let Some(override_dir) = std::env::var_os("LANGHIRE_DATA_DIR") {
+        Some(std::path::PathBuf::from(override_dir))
+    } else if cfg!(target_os = "macos") {
         dirs::home_dir().map(|h| h.join("Library/Application Support/langhire"))
     } else if cfg!(target_os = "windows") {
         dirs::data_dir().map(|d| d.join("langhire"))
@@ -90,6 +92,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
+            #[cfg(target_os = "windows")]
+            if matches!(_event, tauri::RunEvent::ExitRequested { .. }) {
+                if let Some(child) = _app.state::<Backend>().0.lock().unwrap().take() {
+                    let _ = child.kill();
+                }
+            }
             // Sidecar lifecycle is self-managed:
             // - Parent watchdog thread in Python detects when Tauri exits
             // - SIGTERM handler cleans up browser processes

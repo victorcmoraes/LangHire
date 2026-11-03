@@ -17,13 +17,15 @@ if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
 }
 
 # Build with PyInstaller
-uv run python -m PyInstaller `
+uv run --frozen python -m PyInstaller `
   --onefile `
   --name "langhire-backend-$Target" `
   --distpath src-tauri/binaries `
   --workpath build/pyinstaller `
   --specpath build `
   --paths "$ProjectDir/backend" `
+  --paths "$ProjectDir" `
+  --add-data "$ProjectDir/backend;backend" `
   --add-data "$ProjectDir/backend/core;core" `
   --add-data "$ProjectDir/backend/memory;memory" `
   --add-data "$ProjectDir/backend/sources;sources" `
@@ -48,9 +50,10 @@ uv run python -m PyInstaller `
   --hidden-import pydantic_settings `
   --hidden-import psutil `
   --hidden-import yaml `
+  --hidden-import backend.core.easy_apply `
+  --hidden-import backend.core.easy_answers `
   --collect-all browser_use `
   --collect-all playwright `
-  --clean `
   backend/main.py
 
 $BinaryPath = "src-tauri/binaries/langhire-backend-" + $Target + ".exe"

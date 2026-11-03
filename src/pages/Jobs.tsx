@@ -7,6 +7,7 @@ import { Search, Play, CheckCircle } from "lucide-react";
 import CollectTab from "./jobs/CollectTab";
 import PendingTab from "./jobs/PendingTab";
 import HistoryTab from "./jobs/HistoryTab";
+import EasyApplyPanel from "../components/EasyApplyPanel";
 
 type TabId = "collect" | "pending" | "history";
 
@@ -54,6 +55,7 @@ export default function Jobs() {
       />
 
       {/* Workflow Steps */}
+      <EasyApplyPanel />
       <div className="flex items-center gap-0 mb-6">
         {tabs.map(({ id, label, icon: Icon, count }, index) => (
           <div key={id} className="flex items-center">

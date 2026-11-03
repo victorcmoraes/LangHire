@@ -81,9 +81,10 @@ def create_llm(settings: dict):
             host=base_url,  # native Ollama host (NOT the /v1 OpenAI shim)
             timeout=300,
             ollama_options={
-                "num_ctx": 32768,    # large context: agent prompt + DOM/screenshot is big
+                "num_ctx": cfg.get("num_ctx", 16384),
                 "num_predict": 4096,  # room for full JSON output (avoids truncation)
                 "temperature": 0.0,
+                "think": False,
             },
         )
 

@@ -3,6 +3,7 @@
  * The backend runs as a local FastAPI server on a dynamic port.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { HumanIntervention } from "./types";
 import type {
   CandidateProfile,
   LLMSettings,
@@ -24,6 +25,10 @@ import type {
 } from "./types";
 
 const DEFAULT_PORT = 8743;
+
+export const getInterventions = () => request<HumanIntervention[]>("/apply/interventions");
+export const confirmIntervention = (id: string) =>
+  request<{ success: boolean }>(`/apply/interventions/${encodeURIComponent(id)}/confirm`, { method: "POST" });
 
 let backendPort = DEFAULT_PORT;
 let tokenPromise: Promise<string> | null = null;
@@ -247,12 +252,28 @@ export async function exportMemories() {
 }
 
 // ── Apply ─────────────────────────────────────────────────────────────────
-export async function startApplying(params: { workers?: number; mode?: string; limit?: number; job_url?: string; job_urls?: string[] }) {
+export async function startApplying(params: { workers?: number; mode?: string; limit?: number; job_url?: string; job_urls?: string[]; execution?: "review" | "submit"; review_id?: string }) {
   return request<{ success: boolean; message: string }>("/apply/start", {
     method: "POST",
     body: JSON.stringify(params),
   });
 }
+
+export interface EasyQuestion {
+  id: number; question: string; state: string; answer: string | number | boolean | null;
+  proposal: string | number | boolean | null; context: Record<string, string>; refs: string[]; jobs: string[];
+  field: { type: string; options?: {text: string; value: string}[]; profile_text?: string };
+}
+export interface EasyReview { id: string; job_url: string; digest: string; payload: string; }
+export const getEasyAnswers = () => request<EasyQuestion[]>("/easy/answers");
+export const getEasyReviews = () => request<EasyReview[]>("/easy/reviews");
+export const getEasyFacts = () => request<Record<string, {value: unknown}>>("/easy/facts");
+export const getEasyChannel = () => request<{suspended: number; reason: string}>("/easy/channel");
+export const verifyEasySession = () => request<{success: boolean}>("/easy/channel/resume", {method: "POST"});
+export const proposeEasyAnswer = (id: number) => request<{supported?: boolean; message?: string}>(`/easy/answers/${id}/propose`, {method: "POST"});
+export const approveEasyAnswer = (id: number, value: string | boolean | number, salary_context?: {currency: string; period: string}) => request(`/easy/answers/${id}/approve`, {method: "POST",body: JSON.stringify({value, ...(salary_context ? {salary_context} : {})})});
+export const qualifyEasyJob = (job_url: string, evidence: string, fact_refs: string[], language: string, currency: string, period: string) =>
+  request("/easy/qualify", {method: "POST",body: JSON.stringify({job_url,evidence,fact_refs,country:"BR",language,currency,period})});
 
 export async function stopApplying() {
   return request<{ success: boolean }>("/apply/stop", { method: "POST" });

@@ -39,9 +39,9 @@ if (Test-Path "node_modules\.bin\tauri.cmd") {
 
 # 2. Install dependencies
 Write-Host "Installing JS dependencies..."
-npm install
+npm.cmd ci --ignore-scripts
 Write-Host "Syncing Python dependencies..."
-uv sync
+uv sync --frozen
 
 if (-not $Tauri) {
   Write-Error "Tauri CLI not found. Run 'npm install' or 'cargo install tauri-cli --version ^2'."

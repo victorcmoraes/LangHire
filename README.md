@@ -4,6 +4,8 @@
 
 <h1 align="center">LangHire</h1>
 
+> **Local automation fork:** durable submission attempts, human CAPTCHA holds and independent portal confirmation. See [the fork operation guide](docs/FORK_LOCAL.md) for commands, migration, validation and current limits. Upstream: [jaimaann/LangHire](https://github.com/jaimaann/LangHire).
+
 <p align="center">
   <strong>AI-powered job application automation with a native desktop UI</strong>
 </p>
