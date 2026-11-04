@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "LangHire Lever Assist",
+  "version": "1.0",
+  "description": "Fills Lever applications from the local LangHire assistant; the candidate solves the CAPTCHA and submits.",
+  "content_scripts": [{
+    "matches": ["https://jobs.lever.co/*", "https://jobs.eu.lever.co/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}

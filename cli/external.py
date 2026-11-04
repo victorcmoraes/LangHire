@@ -44,6 +44,8 @@ def main():
     approve=sub.add_parser('approve-answer');approve.add_argument('--id',type=int,required=True)
     value=approve.add_mutually_exclusive_group(required=True);value.add_argument('--text');value.add_argument('--json-value');value.add_argument('--value-file',type=Path)
     approve.add_argument('--currency');approve.add_argument('--period',choices=('monthly','annual','hourly'))
+    assist=sub.add_parser('lever-assist',help="Serve answers to a bookmarklet in the candidate's own Chrome; the candidate solves the CAPTCHA and submits")
+    assist.add_argument('--no-open',action='store_true')
     diagnose=sub.add_parser('diagnose-lever');diagnose.add_argument('--job-url',required=True)
     preflight=sub.add_parser('preflight');preflight.add_argument('--limit',type=int,default=50)
     resolve=sub.add_parser('resolve-pending',help='Answer stored pending questions with the local model; no browser, no sends')
@@ -72,6 +74,14 @@ def main():
         from backend.core.automatic_answers import resolve_pending
         show=lambda row,state:print(json.dumps({'id':row['id'],'question':row['question'][:90],'result':state},ensure_ascii=False),flush=True)
         print(json.dumps(asyncio.run(resolve_pending(data,args.limit,show)),ensure_ascii=False,indent=2));return
+    if args.command=='lever-assist':
+        from filelock import FileLock
+        from backend.core.lever_assist import serve
+        from backend.core.config import load_settings
+        # Holding the worker lease keeps automatic runs from recovering the attempts the candidate is filling.
+        with FileLock(str(data/'application-worker.lock'),timeout=0):
+            triage(data);serve(data,load_settings().get('resume_path',''),not args.no_open)
+        return
     if args.command=='diagnose-lever':
         from filelock import FileLock
         import shutil
