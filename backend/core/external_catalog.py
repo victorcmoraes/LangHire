@@ -143,7 +143,7 @@ def refresh_board(platform,board):
 
 def check_missing_jobgether(previous,rows,closed=()):
     """Only an individual 404 proves closure on this incomplete board; stop on other errors."""
-    active={identity(j) for j in rows};closed=set(closed)-{key[2] for key in active};checked=0;error={}
+    active={identity(j) for j in rows};closed=set(closed)-{key[2] for key in active};checked=0;error={};slow=0
     for key in sorted(previous):
         if key[:2]!=('lever','jobgether') or key in active or key[2] in closed:continue
         if checked>=150:break
@@ -156,6 +156,11 @@ def check_missing_jobgether(previous,rows,closed=()):
         except HTTPError as failure:
             if failure.code==404:closed.add(key[2]);continue
             error={'posting_check_error':type(failure).__name__,'posting_check_http_status':failure.code};break
+        except TimeoutError as failure:
+            # Lever's posting endpoint stalls intermittently; a slow reply proves nothing, so skip it unless it keeps happening.
+            slow+=1
+            if slow<3:continue
+            error={'posting_check_error':type(failure).__name__};break
         except Exception as failure:
             error={'posting_check_error':type(failure).__name__};break
     return dict(posting_not_found=sorted(closed),posting_checks=checked,**error)

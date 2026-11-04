@@ -62,7 +62,7 @@ def test_only_individual_404_closes_missing_jobs_and_survives_next_refresh(tmp_p
     assert calls==['1','2','2'] and triage(tmp_path)['states']=={'eligible':3}
 
 
-@pytest.mark.parametrize('status',[429,500,503,TimeoutError('Fixture timeout')])
+@pytest.mark.parametrize('status',[429,500,503])
 def test_transient_failure_stops_round_without_closing_jobs(tmp_path,monkeypatch,status):
     rows=[job(i) for i in range(1,4)];seed(tmp_path,rows)
     calls=api(monkeypatch,{'1':status})
@@ -103,3 +103,10 @@ def test_failed_collection_never_checks_postings(tmp_path,monkeypatch):
     monkeypatch.setattr('core.external_discovery.scoped_board',fail)
     result=discover(tmp_path)
     assert calls==[] and result['catalog_jobs']==1 and result['boards'][0]['error']=='TimeoutError'
+
+
+def test_isolated_timeouts_are_skipped_and_repeated_ones_stop_the_round(monkeypatch):
+    previous={identity(job(i)):job(i) for i in range(1,6)}
+    calls=api(monkeypatch,{'1':TimeoutError(),'2':404,'3':TimeoutError(),'4':TimeoutError(),'5':404})
+    result=check_missing_jobgether(previous,[])
+    assert calls==['1','2','3','4'] and result['posting_not_found']==['2'] and result['posting_check_error']=='TimeoutError'
