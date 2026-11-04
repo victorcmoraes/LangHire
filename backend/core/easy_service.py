@@ -10,7 +10,22 @@ from urllib.parse import urlencode
 from .application_safety import SafetyError
 from .browser_runtime import persistent_browser
 from .easy_apply import EasyStore, canonical, check_session, execute_easy, EASY, read_job_metadata
-from .easy_answers import AnswerBook
+from .easy_answers import AnswerBook, normalized
+
+# The search-results layout renders cards as role=button elements keyed by job id instead of /jobs/view/ anchors.
+CARD_LINKS = r'''() => {
+  const seen = new Map();
+  for (const a of document.querySelectorAll('a[href*="/jobs/view/"]')) seen.set(a.href, '');
+  for (const card of document.querySelectorAll('[componentkey^="job-card-component-ref-"]')) {
+    const id = card.getAttribute('componentkey').match(/(\d{6,})$/);
+    if (!id) continue;
+    const dismiss = card.querySelector('button[aria-label]');
+    const label = dismiss ? dismiss.getAttribute('aria-label').replace(/^(Fechar vaga de|Dismiss)\s*/i, '').trim() : '';
+    const url = 'https://www.linkedin.com/jobs/view/' + id[1] + '/';
+    if (!seen.has(url) || label) seen.set(url, label);
+  }
+  return [...seen.entries()];
+}'''
 
 
 async def collect(data, profile, title, limit, filters, status):
@@ -41,12 +56,16 @@ async def collect(data, profile, title, limit, filters, status):
                 raise
             await page.goto('https://www.linkedin.com/jobs/search/?'+urlencode(params),wait_until='domcontentloaded')
             await page.wait_for_timeout(2000)
-            links = await page.locator('a[href*="/jobs/view/"]').evaluate_all('es=>[...new Set(es.map(e=>e.href))]')
-            for raw in links[:30]:
+            links = await page.evaluate(CARD_LINKS)
+            from .job_tracks import load_job_tracks, matches_track
+            tracks = load_job_tracks(data)
+            for raw, card_title in links[:40]:
                 if status.get('cancel_requested') or status.get('collected',0)>=limit: break
                 try: url = canonical(raw)
                 except SafetyError: continue
                 if url in existing: continue
+                # Skip cards whose title is already outside the configured tracks; no page visit needed.
+                if card_title and (tracks['exclude'].search(normalized(card_title)) or not matches_track(card_title,tracks)): continue
                 await page.goto(url,wait_until='domcontentloaded')
                 button = page.get_by_role('button',name=EASY)
                 try: await button.first.wait_for(timeout=15000)
