@@ -66,6 +66,19 @@ def workable_job(item,board,company):
             'location':location,'description':plain(item.get('description','')),'workplaceType':mode}
 
 
+def recruitee_job(item,board):
+    mode='hybrid' if item.get('hybrid') else 'on-site' if item.get('on_site') else 'remote' if item.get('remote') else ''
+    location=', '.join(dict.fromkeys(str(item[k]) for k in ('location','city','country','country_code') if item.get(k)))
+    if mode:location+=' ('+mode+')'
+    return {'platform':'recruitee','source':'recruitee','board':board,'company':board,'externalId':str(item['id']),
+            'job_key':f'recruitee:{board}:{item["id"]}','title':item['title'],'url':item['careers_url'],
+            'applyUrl':item.get('careers_apply_url'),'location':location,'workplaceType':mode,'country':item.get('country_code'),
+            'description':plain(item.get('description',''))+'\n\n'+plain(item.get('requirements','')),
+            'employment_type_code':item.get('employment_type_code'),'published_at':item.get('published_at'),
+            'recruitee_slug':item['slug'],'recruitee_questions':{k:item.get(k) for k in
+                ('open_questions','options_cv','options_phone','options_cover_letter')}}
+
+
 def cornerstone_job(item,board):
     tenant,site=board_parts(board)
     locations=[', '.join(str(place.get(k) or '').strip().title() if k=='city' else str(place.get(k) or '').strip()
@@ -115,13 +128,15 @@ def refresh_board(platform,board):
     url=(f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true' if platform=='greenhouse'
          else f'https://api.ashbyhq.com/posting-api/job-board/{board}' if platform=='ashby'
          else f'https://www.workable.com/api/accounts/{board}?details=true' if platform=='workable'
+         else f'https://{board}.recruitee.com/api/offers/' if platform=='recruitee'
          else f'https://api.lever.co/v0/postings/{board}?mode=json')
     if platform=='lever' and board=='jobgether':url+='&location=Brazil&limit=100'
     req=urllib.request.Request(url,headers={'User-Agent':'LangHire-local-job-catalog/1.0','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=40) as response:data=json.load(response)
-    rows=data['jobs'] if platform in ('greenhouse','ashby','workable') else data
+    rows=data['offers'] if platform=='recruitee' else data['jobs'] if platform in ('greenhouse','ashby','workable') else data
     result=[]
     for item in rows:
+        if platform=='recruitee' and item.get('status')!='published':continue
         if platform=='ashby' and item.get('isListed') is False:continue
         if platform=='workable' and not item.get('published_on'):continue
         if platform=='greenhouse':
@@ -130,6 +145,8 @@ def refresh_board(platform,board):
                  'applyUrl':f'https://job-boards.greenhouse.io/{board}/jobs/{item["id"]}',
                  'location':item.get('location',{}).get('name',''),'description':plain(item.get('content','')),
                  'offices':item.get('offices',[]),'metadata':item.get('metadata',[])}
+        elif platform=='recruitee':
+            job=recruitee_job(item,board)
         elif platform=='ashby':
             job=ashby_job(item,board)
         elif platform=='workable':
@@ -187,7 +204,7 @@ def merge_filtered_jobgether(data_dir):
 
 def refresh_imported(data_dir):
     data_dir=Path(data_dir);jobs=json.loads((data_dir/'jobs.json').read_text(encoding='utf-8'))
-    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable')}
+    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable','recruitee')}
     path=data_dir/'external/catalog.json'
     catalog=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'jobs':[],'boards':[]}
     known={identity(j):j for j in catalog['jobs'] if identity(j)[:2]==('lever','jobgether')}

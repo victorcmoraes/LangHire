@@ -136,7 +136,7 @@ def triage(data_dir):
     data=Path(data_dir);tracks=load_job_tracks(data);book=AnswerBook(data);store=AttemptStore(data)
     catalog=json.loads((data/'external/catalog.json').read_text(encoding='utf-8'))
     jobs=json.loads((data/'jobs.json').read_text(encoding='utf-8'))
-    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable')}
+    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable','recruitee')}
     current={identity(j):j for j in catalog['jobs']}
     boards={(b['platform'],b['board']):b for b in catalog['boards']}
     protected={job_key(a['job_url']) for a in store.list() if a['state'] in ('confirmed','uncertain','running','submitted','awaiting_human')}

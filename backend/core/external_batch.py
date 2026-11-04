@@ -101,6 +101,7 @@ class BatchStore:
             history=known.get(item['job_key'],[])
             protected=next((a for a in history if a['state']=='confirmed'),None)
             protected=protected or next((a for a in history if a['state'] in ('uncertain','submitted','awaiting_human','running')),None)
+            if item['job']['platform']=='recruitee':protected=protected or next((a for a in history if self.attempts.submissions(a['id'])),None)
             if protected:self.item(bid,item['job']['url'],protected['state'],{'reason':protected['message'],'reconciled_from_attempts':True},protected['id'])
 
     def pending(self,bid):
@@ -163,6 +164,7 @@ async def prepare_batch(store,bid,metrics,answer_run_id=None):
     semaphore=asyncio.Semaphore(3);batch=store.get(bid)
     async def prepare(item):
         if item['state'] in ('confirmed','uncertain','submitted','awaiting_human','reviewed','unavailable'):return
+        if item['job']['platform']=='recruitee' and item['attempt_id'] and store.attempts.submissions(item['attempt_id']):return
         job=dict(item['job'],eligibility_country='BR',form_language='en',_answer_run_id=answer_run_id or bid)
         if batch_hold(store.data,job['platform'],batch['config']['execution']):
             store.item(bid,job['url'],'paused',{'reason':'platform_hold'});return
@@ -217,7 +219,7 @@ async def run_batch(data,bid,*,discovery=None):
                         decision['facts_version']=book.reference_version(decision['fact_refs']);job['external_qualification']=decision
                         if batch_hold(store.data,job['platform'],execution):store.item(bid,job['url'],'paused',{'reason':'platform_hold'});continue
                         store.item(bid,job['url'],'running',{'reason':'browser_preparation'})
-                        if session is None:session=await stack.enter_async_context(persistent_browser(store.data))
+                        if session is None and job['platform']!='recruitee':session=await stack.enter_async_context(persistent_browser(store.data))
                         before={a['id'] for a in store.attempts.list()}
                         try:
                             result=await execute_external(job,store.data,load_settings().get('resume_path',''),execution,status,lease_held=True,session=session)

@@ -38,6 +38,8 @@ def queue(data):
     all_jobs=json.loads((data/'jobs.json').read_text(encoding='utf-8'))
     known={job_key(url):j for url,j in all_jobs.items()}
     protected={job_key(a['job_url']) for a in store.list() if a['state'] in ('confirmed','uncertain','running','submitted','awaiting_human')}
+    protected.update(job_key(a['job_url']) for a in store.list()
+                     if re.fullmatch(r'https://[a-z0-9-]+\.recruitee\.com/o/[^/?]+',a['job_url']) and store.submissions(a['id']))
     def company_title(j):return (normalized(j.get('company') or j.get('board') or ''),core_title(j['title']))
     protected_titles={company_title(known[k]) for k in protected if k in known and company_title(known[k])[0]}
     named_titles={core_title(known[k]['title']) for k in protected if k in known
@@ -49,7 +51,7 @@ def queue(data):
     for decision in triage['decisions']:
         if decision['state']!='eligible':continue
         key=(decision['platform'],decision['board'],decision['externalId']);job=by.get(key)
-        if not job or job['platform'] not in ('lever','greenhouse'):continue
+        if not job or job['platform'] not in ('lever','greenhouse','recruitee'):continue
         if (job['platform'],job['board'].lower()) in excluded:continue
         title=core_title(job['title'])
         match=re.search(r'\b(?:job[\s-]*)?(\d{5})\b',job['title'],re.I)
@@ -112,7 +114,7 @@ async def run_external(data,body,status):
     (data/'reports').mkdir(exist_ok=True)
     status.setdefault('mode','external');status.setdefault('running',True)
     status.setdefault('answer_run_id',uuid.uuid4().hex)
-    jobs=[j for j in queue(data) if j['platform'] in ('lever','greenhouse')]
+    jobs=[j for j in queue(data) if j['platform'] in ('lever','greenhouse','recruitee')]
     if getattr(body,'platform',None):jobs=[j for j in jobs if j['platform']==body.platform]
     if body.job_url:jobs=[j for j in jobs if canonical_ats(j['url'])==canonical_ats(body.job_url)]
     elif body.job_urls:

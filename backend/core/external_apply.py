@@ -51,6 +51,9 @@ def canonical_ats(url):
     if cornerstone:return job_url(*cornerstone)
     p=urlsplit(url);host=p.hostname or ''
     if p.scheme!='https':raise SafetyError('Hosted ATS must use HTTPS')
+    if (re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.recruitee\.com',host)
+            and re.fullmatch(r'/o/[A-Za-z0-9_-]+/?',p.path) and p.port in (None,443) and not p.username and not p.password):
+        return 'https://'+host+p.path.rstrip('/')
     if host=='apply.workable.com' and re.fullmatch(r'/[\w-]+/j/[A-Za-z0-9]+(?:/apply)?/?',p.path):
         return 'https://'+host+p.path.rstrip('/').removesuffix('/apply')
     if host in ('jobs.lever.co','jobs.eu.lever.co') and re.fullmatch(r'/[\w-]+/[0-9a-f-]{36}(?:/apply)?/?',p.path,re.I):
@@ -267,7 +270,7 @@ async def application_browser(data,existing=None):
 
 async def execute_external(job,data,resume,execution='review',status=None,lease_held=False,session=None):
     from contextlib import nullcontext
-    if job['platform'] not in ('lever','greenhouse'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
+    if job['platform'] not in ('lever','greenhouse','recruitee'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
     data=Path(data);job=dict(job,url=canonical_ats(job['url']),eligibility_country='BR',form_language='en')
     contact=data/'pending-contact-verification.json'
     if execution=='submit' and contact.exists() and json.loads(contact.read_text(encoding='utf-8')).get('active'):
@@ -275,10 +278,24 @@ async def execute_external(job,data,resume,execution='review',status=None,lease_
     if execution=='submit' and platform_hold(data,job['platform'],job):
         raise SafetyError('Platform submissions paused for verification diagnosis: '+job['platform'])
     with (nullcontext() if lease_held else FileLock(str(data/'application-worker.lock'),timeout=0)):
-        store=AttemptStore(data);store.recover();aid=store.begin(job['url'])
+        store=AttemptStore(data);store.recover()
+        if job['platform']=='recruitee' and any(job_key(a['job_url'])==job_key(job['url']) and store.submissions(a['id']) for a in store.list()):
+            raise SafetyError('Recruitee send already attempted; reconcile instead of resending')
+        aid=store.begin(job['url'])
         if job.get('_batch_id'):store.event(aid,'external_batch',{'batch_id':job['_batch_id'],'attempt_id':aid})
         if job.get('external_qualification'):store.event(aid,'external_qualification',job['external_qualification'])
         try:
+            if job['platform']=='recruitee':
+                from .recruitee_apply import RecruiteeAdapter
+                adapter=RecruiteeAdapter(job,data,aid,status)
+                try:await adapter.run(resume,execution)
+                except BaseException as error:
+                    message=str(error)[:700] if isinstance(error,SafetyError) else 'Recruitee execution failed: '+type(error).__name__
+                    store.event(aid,'external_error',{'type':type(error).__name__,'message':message})
+                    if store.get(aid)['state'] in ACTIVE:store.transition(aid,'uncertain' if store.submissions(aid) else 'pending',message)
+                    if isinstance(error,asyncio.CancelledError):raise
+                finally:store.event(aid,'answer_metrics',adapter.metrics)
+                return store.get(aid)
             adapter_type=LeverAdapter
             if job['platform']=='greenhouse':
                 from .greenhouse_apply import GreenhouseAdapter

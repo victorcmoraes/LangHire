@@ -27,18 +27,23 @@ def board_spec(value):
             raise SafetyError('Use an official HTTPS job-board URL')
         platform={'jobs.lever.co':'lever','job-boards.greenhouse.io':'greenhouse','boards.greenhouse.io':'greenhouse','jobs.ashbyhq.com':'ashby','apply.workable.com':'workable'}.get(p.hostname)
         board=p.path.strip('/').split('/')[0]
+        if re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.recruitee\.com',p.hostname or ''):
+            platform='recruitee';board=p.hostname.split('.')[0]
         try:cornerstone=url_parts(value)
         except ValueError as error:raise SafetyError('Invalid public ATS board') from error
         if cornerstone:
             tenant,site=cornerstone;platform='cornerstone';board=tenant+('/'+str(site) if site!=1 else '')
     else:
         parts=value.split(':',1)
-        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company, lever:company, ashby:company, workable:company or cornerstone:tenant/siteId')
+        if len(parts)!=2:raise SafetyError('Board format: greenhouse:company, lever:company, ashby:company, workable:company, recruitee:company or cornerstone:tenant/siteId')
         platform,board=parts
     if platform=='cornerstone':
         try:tenant,site=board_parts(board)
         except ValueError as error:raise SafetyError('Invalid public ATS board') from error
         return {'platform':platform,'board':tenant+('/'+str(site) if site!=1 else '')}
+    if platform=='recruitee':
+        if not isinstance(board,str) or not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?',board):raise SafetyError('Invalid Recruitee company')
+        return {'platform':platform,'board':board}
     if platform not in ('lever','greenhouse','ashby','workable') or not isinstance(board,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,99}',board):
         raise SafetyError('Invalid public ATS board')
     return {'platform':platform,'board':board}

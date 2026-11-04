@@ -16,7 +16,7 @@ from .external_qualification import home_cities,qualify
 from .job_tracks import load_job_tracks,matches_track
 
 
-LINK=re.compile(r'https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.csod\.com/ux/ats/careersite/[1-9][0-9]{0,9}(?=[/\s?\"<>]|$)(?:/[^\s\"<>]*)?(?:\?[^\s\"<>]*)?|(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)/[A-Za-z0-9][A-Za-z0-9_-]{0,99}(?=[/\s?\"<>]|$))',re.I)
+LINK=re.compile(r'https://(?:[a-z0-9][a-z0-9-]{0,62}\.recruitee\.com(?=[/\s?\"<>]|$)(?:/o/[A-Za-z0-9_-]+)?|[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.csod\.com/ux/ats/careersite/[1-9][0-9]{0,9}(?=[/\s?\"<>]|$)(?:/[^\s\"<>]*)?(?:\?[^\s\"<>]*)?|(?:boards\.greenhouse\.io|job-boards\.greenhouse\.io|jobs\.lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)/[A-Za-z0-9][A-Za-z0-9_-]{0,99}(?=[/\s?\"<>]|$))',re.I)
 CACHE_SECONDS=86400
 
 
