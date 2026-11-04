@@ -141,12 +141,19 @@ async def read_job_metadata(page):
     location=''
     for i,line in enumerate(lines[:-1]):
         if normalized(line)==normalized(title):location=lines[i+1].split('·')[0].strip();break
+    # The header's workplace chip ("Remoto", "Híbrido", "Presencial") is the recruiter's own arrangement field.
+    header=text
+    for marker in ('Sobre a vaga','About the job'):
+        if marker in header:header=header.split(marker,1)[0];break
+    modes={'remoto':'remote','remote':'remote','hibrido':'hybrid','hybrid':'hybrid','presencial':'on-site','on site':'on-site'}
+    chips={modes[normalized(line)] for line in header.splitlines() if normalized(line) in modes}
+    workplace=chips.pop() if len(chips)==1 else ''
     description=text
     for marker in ('Sobre a vaga','About the job'):
         if marker in description:description=description.split(marker,1)[1];break
     for marker in ('Sobre a empresa','About the company'):
         if marker in description:description=description.split(marker,1)[0];break
-    return {'title':title,'company':company,'location':location,'description':description}
+    return {'title':title,'company':company,'location':location,'description':description,'workplaceType':workplace}
 
 
 class EasyExecutor:

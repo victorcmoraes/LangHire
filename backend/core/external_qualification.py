@@ -35,7 +35,7 @@ def qualify(job,facts,tracks=None):
         return result('discarded','mobile_outside_tracks',[title])
     if not tracks['allow_pure_frontend'] and re.search(r'front.?end',normalized(title)) and not re.search(r'back.?end|full.?stack',normalized(title)):
         return result('discarded','pure_frontend_outside_tracks',[title])
-    if re.search(r'exclusiv[ao]|applicants only|afirmativ[ao]|affirmative',normalized(title)):
+    if re.search(r'exclusiv[ao]|applicants only|afirmativ[ao]|affirmative|\bpcd\b|pessoas? com deficiencia',normalized(title)):
         return result('pending','affirmative_eligibility_not_confirmed',[title])
     if re.search(r'accounting experience',title,re.I) and not facts.get('experience.accounting',{}).get('value'):
         return result('pending','specialized_requirement_needs_evidence',[title])
@@ -94,7 +94,7 @@ def qualify(job,facts,tracks=None):
     explicit_mode=re.search(r'(?:work\s*type|\bmode|modalidade|modelo(?: de (?:trabalho|atua[çc][ãa]o))?)\s*:\s*(remot[eo]|hybrid|h[íi]brid[oa]|on.?site|presencial)',description,re.I)
     hybrid=re.search(r'we are a hybrid|(?:minimum of|require).{0,30}\d+ days per week in the office',description,re.I)
     # LinkedIn's #LI-Remote line is the recruiter's workplace tag, like Lever's workplaceType.
-    metadata_remote=(job.get('platform',job.get('source'))=='lever' and job.get('workplaceType')=='remote') or bool(re.search(r'^\s*#LI-Remote\b\W*$',description,re.I|re.M))
+    metadata_remote=(job.get('platform',job.get('source')) in ('lever','linkedin') and job.get('workplaceType')=='remote') or bool(re.search(r'^\s*#LI-Remote\b\W*$',description,re.I|re.M))
     # A stated location policy is evidence; a generic country mention or
     # occasional remote-work benefit is not.
     home_policy=re.search(r'(?:can|may) (?:live|work) anywhere in (?:Brazil|Brasil)|(?:pode\w*|possibilidade de) (?:morar|trabalhar) (?:de |em )?qualquer (?:lugar|local) (?:do |no )?Brasil',description,re.I)

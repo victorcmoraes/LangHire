@@ -35,7 +35,8 @@ async def collect(data, profile, title, limit, filters, status):
     book = AnswerBook(data)
     city = book.facts.get('location.city', {}).get('value', '')
     country = book.facts.get('location.country', {}).get('value', '')
-    params = {'keywords': title or 'backend developer', 'location': country or city, 'f_AL': 'true'}
+    # A regional search ("Latin America", "Worldwide") finds remote jobs open beyond the candidate's country.
+    params = {'keywords': title or 'backend developer', 'location': filters.get('location') or country or city, 'f_AL': 'true'}
     for key, param in {'date_posted':'f_TPR','experience_level':'f_E','work_type':'f_WT','job_type':'f_JT'}.items():
         if filters.get(key): params[param] = str(filters[key])
     jobs = read_jobs()
@@ -74,7 +75,7 @@ async def collect(data, profile, title, limit, filters, status):
                 title_text,text,location_text,company=(metadata[k] for k in ('title','description','location','company'))
                 # Collection never asserts that an unreviewed description proves eligibility.
                 jobs[url] = {'url':url,'title':title_text,'company':company,'location':location_text,
-                             'description':text,'easy_apply':True,'easy_verified':True,'status':'blocked',
+                             'description':text,'workplaceType':metadata.get('workplaceType',''),'easy_apply':True,'easy_verified':True,'status':'blocked',
                              'easy_result':'qualification_pending','error':'Review mandatory requirements and geographic eligibility before application',
                              'source':'linkedin','search_title':title or '', 'qualification':None}
                 existing.add(url)
