@@ -37,6 +37,8 @@ def job_key(url):
         return 'greenhouse:'+match[1]+':'+match[2]
     match=re.fullmatch(r'/([\w-]+)/([0-9a-f-]{36})(?:/application)?/?',parsed.path,re.I)
     if host=='jobs.ashbyhq.com' and match:return 'ashby:'+match[1]+':'+match[2].lower()
+    match=re.fullmatch(r'/([\w-]+)/j/([A-Za-z0-9]+)(?:/apply)?/?',parsed.path)
+    if host=='apply.workable.com' and match:return 'workable:'+match[1].lower()+':'+match[2].upper()
     return host+parsed.path.rstrip('/').removesuffix('/apply').rstrip('/')
 
 

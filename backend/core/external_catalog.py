@@ -52,6 +52,19 @@ def ashby_job(item,board):
             'workplaceType':mode,'secondaryLocations':item.get('secondaryLocations',[]),'address':item.get('address')}
 
 
+def workable_job(item,board,company):
+    mode={'remote':'remote','hybrid':'hybrid','on_site':'on-site'}.get(item.get('workplace_type'),'')
+    if not item.get('workplace_type') and item.get('telecommuting') is True:mode='remote'
+    places=item.get('locations') or [{'city':item.get('city'),'region':item.get('state'),'country':item.get('country')}]
+    locations=[', '.join(place[k] for k in ('city','region','country') if place.get(k)) for place in places]
+    location='; '.join(dict.fromkeys(place for place in locations if place))
+    if mode:location+=' ('+mode+')'
+    url=f'https://apply.workable.com/{board}/j/{item["shortcode"]}'
+    return {'platform':'workable','source':'workable','board':board,'company':company or board,
+            'externalId':str(item['shortcode']),'title':item['title'],'url':url,'applyUrl':url+'/apply',
+            'location':location,'description':plain(item.get('description','')),'workplaceType':mode}
+
+
 def cornerstone_job(item,board):
     tenant,site=board_parts(board)
     locations=[', '.join(str(place.get(k) or '').strip().title() if k=='city' else str(place.get(k) or '').strip()
@@ -100,14 +113,16 @@ def refresh_board(platform,board):
     if platform=='cornerstone':return cornerstone_jobs(board)
     url=(f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true' if platform=='greenhouse'
          else f'https://api.ashbyhq.com/posting-api/job-board/{board}' if platform=='ashby'
+         else f'https://www.workable.com/api/accounts/{board}?details=true' if platform=='workable'
          else f'https://api.lever.co/v0/postings/{board}?mode=json')
     if platform=='lever' and board=='jobgether':url+='&location=Brazil&limit=100'
     req=urllib.request.Request(url,headers={'User-Agent':'LangHire-local-job-catalog/1.0','Accept':'application/json'})
     with urllib.request.urlopen(req,timeout=40) as response:data=json.load(response)
-    rows=data['jobs'] if platform in ('greenhouse','ashby') else data
+    rows=data['jobs'] if platform in ('greenhouse','ashby','workable') else data
     result=[]
     for item in rows:
         if platform=='ashby' and item.get('isListed') is False:continue
+        if platform=='workable' and not item.get('published_on'):continue
         if platform=='greenhouse':
             job={'platform':platform,'source':platform,'board':board,'externalId':str(item['id']),
                  'title':item['title'],'url':f'https://job-boards.greenhouse.io/{board}/jobs/{item["id"]}',
@@ -116,9 +131,11 @@ def refresh_board(platform,board):
                  'offices':item.get('offices',[]),'metadata':item.get('metadata',[])}
         elif platform=='ashby':
             job=ashby_job(item,board)
+        elif platform=='workable':
+            job=workable_job(item,board,data.get('name'))
         else:
             job=lever_job(item,board)
-        job['company']=board
+        if platform!='workable':job['company']=board
         result.append(job)
     return result
 
@@ -144,7 +161,7 @@ def merge_filtered_jobgether(data_dir):
 
 def refresh_imported(data_dir):
     data_dir=Path(data_dir);jobs=json.loads((data_dir/'jobs.json').read_text(encoding='utf-8'))
-    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone')}
+    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable')}
     boards=sorted({(key[0],key[1]) for key in previous if key[1]})
     result={'imported_unique':len(previous),'boards':[],'jobs':[]}
     with ThreadPoolExecutor(max_workers=3) as pool:

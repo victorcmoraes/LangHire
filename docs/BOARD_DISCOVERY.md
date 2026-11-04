@@ -2,7 +2,7 @@
 
 Run `.venv\Scripts\python.exe -m cli.external boards suggest` to inspect candidates
 without changing the registry or collecting jobs. The command reads official
-Greenhouse, Lever, Ashby and Cornerstone links stored in LinkedIn/Jobgether records and optional
+Greenhouse, Lever, Ashby, Cornerstone and Workable links stored in LinkedIn/Jobgether records and optional
 seeds in the data directory's `external/board-seeds.txt`.
 
 Seeds accept one `platform:slug` or official HTTPS board URL per line. Blank lines
@@ -53,3 +53,26 @@ pages only the public `rec-job-search/external/jobs` search endpoint. Collection
 is read-only; applications are manual and Cornerstone jobs are excluded from
 automated queues and runs. Board validation uses the same cache and human review
 handling for HTTP 401, 403 and 429 as other public boards.
+
+## Workable: coleta somente leitura, 2026-11-03
+
+Aceita `workable:example-company` ou a URL oficial
+`https://apply.workable.com/example-company`, inclusive URLs de vagas dessa conta.
+A coleta usa exclusivamente
+`GET https://www.workable.com/api/accounts/{subdomain}?details=true`, confirmado
+sem autenticação em 2026-11-03: `adoreal` respondeu HTTP 200 com 19 vagas e
+`zeptolab`, HTTP 200 com 3 vagas. Foram duas chamadas, com pausa de três segundos.
+O widget e a listagem POST não foram necessários e não foram chamados.
+
+O endpoint retorna vagas públicas; a coleta exige `published_on`, converte a
+descrição HTML em texto e usa `shortcode` como identificador. As URLs são
+normalizadas para `https://apply.workable.com/{conta}/j/{shortcode}`. O nome da
+empresa vem de `name`, com a conta como alternativa. `workplace_type` tem
+prioridade; quando ausente, apenas `telecommuting=true` indica remoto.
+`telecommuting=false` sozinho mantém a modalidade desconhecida. As localizações
+declaradas são preservadas, sem inferir país.
+
+`boards suggest` usa a mesma validação e o mesmo cache dos demais ATS. HTTP 401,
+403 e 429 exigem revisão humana, sem novas tentativas ou troca de endpoint para
+contornar o bloqueio. Workable fica excluído das filas e execuções de candidatura;
+o executor rejeita a plataforma antes de abrir navegador ou criar uma tentativa.

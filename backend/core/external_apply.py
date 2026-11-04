@@ -51,6 +51,8 @@ def canonical_ats(url):
     if cornerstone:return job_url(*cornerstone)
     p=urlsplit(url);host=p.hostname or ''
     if p.scheme!='https':raise SafetyError('Hosted ATS must use HTTPS')
+    if host=='apply.workable.com' and re.fullmatch(r'/[\w-]+/j/[A-Za-z0-9]+(?:/apply)?/?',p.path):
+        return 'https://'+host+p.path.rstrip('/').removesuffix('/apply')
     if host in ('jobs.lever.co','jobs.eu.lever.co') and re.fullmatch(r'/[\w-]+/[0-9a-f-]{36}(?:/apply)?/?',p.path,re.I):
         return 'https://'+host+p.path.rstrip('/').removesuffix('/apply')
     if host in ('job-boards.greenhouse.io','boards.greenhouse.io') and re.fullmatch(r'/[\w-]+/jobs/\d+/?',p.path):

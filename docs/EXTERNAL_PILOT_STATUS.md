@@ -123,21 +123,41 @@ custom questions and verification behavior, and resolve source scope. The API
 alone does not satisfy the phase gate. No Ashby collector, adapter, registry entry
 or submission support was added. Future integration must default to `platform_hold`.
 
-## Workable: Phase 0 checkpoint, 2026-10-28
+## Workable: coleta pública somente leitura, 2026-11-03
 
-The [official public API reference](https://workable.readme.io/reference/jobs-1)
-documents `GET https://www.workable.com/api/accounts/{subdomain}?details=true`,
-with a public jobs array and workplace metadata. This differs from the speculative
-`apply.workable.com/api/...` route in the plan. The
-[careers integration guide](https://help.workable.com/hc/en-us/articles/115012771647-Using-the-Workable-API-to-create-a-careers-page)
-also describes this public route separately from the authenticated SPI API.
+A [referência oficial da API pública](https://workable.readme.io/reference/jobs-1)
+documenta `GET https://www.workable.com/api/accounts/{subdomain}?details=true`.
+O [guia de integração de carreiras](https://help.workable.com/hc/en-us/articles/115012771647-Using-the-Workable-API-to-create-a-careers-page)
+separa essa rota pública da SPI autenticada. Em 2026-11-03, duas chamadas GET sem
+autenticação, separadas por pausa de três segundos, confirmaram:
 
-The [customer terms](https://www.workable.com/terms) restrict misuse and
-circumvention. The single live probe using the vendor's name as the account slug
-returned HTTP 404. That result does not invalidate the documented endpoint or
-establish a platform block; no working account has been verified here. Two form
-inspections, account-specific source checks and confirmation behavior remain
-pending. Phase 0 is incomplete, and no collection or application code was added.
+| Conta | Resultado | Vagas públicas |
+| --- | --- | --- |
+| `adoreal` | HTTP 200 | 19 |
+| `zeptolab` | HTTP 200 | 3 |
+
+Foi usado apenas o endpoint documentado. O widget público
+`https://apply.workable.com/api/v1/widget/accounts/{subdomain}` e a listagem
+`POST https://apply.workable.com/api/v3/accounts/{subdomain}/jobs` não foram
+testados, pois a fonte preferida funcionou. Nenhum bloqueio 401/403/429 ocorreu;
+esses códigos interrompem a validação e exigem revisão humana, sem contorno.
+A sondagem anterior com o nome do fornecedor retornou 404 em 2026-10-28;
+ela não foi repetida nesta verificação.
+
+A integração aceita contas e URLs oficiais, coleta apenas vagas públicas com
+`published_on`, limpa HTML e normaliza `shortcode`, empresa e localizações.
+`workplace_type` prevalece sobre `telecommuting`; na ausência do primeiro,
+`telecommuting=true` indica remoto e `false` mantém a modalidade desconhecida.
+As respostas reais continham URLs curtas `/j/{shortcode}`; o catálogo produz
+URLs com a conta para manter a identidade `workable:{conta}:{shortcode}`.
+
+Workable permanece fora das filas e execuções de candidatura, com a mesma trava
+de Ashby/Cornerstone. Os testes usam API simulada e dados fictícios; nenhuma
+candidatura foi enviada e nenhum formulário foi aberto. Os
+[termos do fornecedor](https://www.workable.com/terms) continuam como referência
+da análise anterior. Inspeções de formulários, verificações de fonte por conta e
+confirmação de candidatura seguem pendentes; esta coleta não conclui a Fase 0
+de candidatura nem adiciona suporte a envio.
 
 ## SmartRecruiters: Phase 0 source restriction, 2026-10-28
 
