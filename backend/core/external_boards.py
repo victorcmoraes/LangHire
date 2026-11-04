@@ -31,7 +31,9 @@ def write_json(path,value):
 
 
 def board_candidates(data,seeds=None):
-    data=Path(data);known={(b['platform'],b['board'].lower()) for b in registry(data)['boards']}
+    data=Path(data);current=registry(data)
+    # Excluded boards count as known so suggestions never bring them back.
+    known={(b['platform'],b['board'].lower()) for b in current['boards']+current.get('excluded',[])}
     candidates={};invalid=[]
     def include(value,source):
         try:spec=board_spec(value)

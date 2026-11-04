@@ -43,11 +43,14 @@ def queue(data):
     named_titles={core_title(known[k]['title']) for k in protected if k in known
                   and company_title(known[k])[0].replace(' ','') in core_title(known[k]['title']).replace(' ','')
                   and company_title(known[k])[0]}
+    path=data/'external/board-registry.json'
+    excluded={(b['platform'],b['board'].lower()) for b in (json.loads(path.read_text(encoding='utf-8')).get('excluded',[]) if path.exists() else [])}
     kept=[];isolated=[];seen=set()
     for decision in triage['decisions']:
         if decision['state']!='eligible':continue
         key=(decision['platform'],decision['board'],decision['externalId']);job=by.get(key)
         if not job or job['platform'] not in ('lever','greenhouse'):continue
+        if (job['platform'],job['board'].lower()) in excluded:continue
         title=core_title(job['title'])
         match=re.search(r'\b(?:job[\s-]*)?(\d{5})\b',job['title'],re.I)
         duplicate=(job['board'],match[1]) if match else (job['board'],title)

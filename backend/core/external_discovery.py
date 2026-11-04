@@ -45,9 +45,11 @@ def board_spec(value):
 
 
 def load_boards(data,extra=()):
-    data=Path(data);rows=[]
+    data=Path(data);rows=[];excluded=set()
     path=data/'external/board-registry.json'
-    if path.exists():rows.extend(json.loads(path.read_text(encoding='utf-8'))['boards'])
+    if path.exists():
+        saved=json.loads(path.read_text(encoding='utf-8'));rows.extend(saved['boards'])
+        excluded={(b['platform'],b['board'].lower()) for b in saved.get('excluded',[])}
     else:
         path=data/'external/catalog.json'
         if path.exists():rows.extend(json.loads(path.read_text(encoding='utf-8')).get('boards',[]))
@@ -55,7 +57,7 @@ def load_boards(data,extra=()):
     unique={}
     for row in rows:
         item=board_spec(row);unique.setdefault((item['platform'],item['board'].lower()),item)
-    return list(unique.values())
+    return [b for key,b in unique.items() if key not in excluded]
 
 
 def candidate_location(job,cities=()):
