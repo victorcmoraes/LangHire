@@ -260,8 +260,8 @@ export async function startApplying(params: { workers?: number; mode?: string; l
 }
 
 export interface EasyQuestion {
-  id: number; question: string; state: string; answer: string | number | boolean | null;
-  proposal: string | number | boolean | null; context: Record<string, string>; refs: string[]; jobs: string[];
+  id: number; question: string; state: string; answer: string | number | boolean | string[] | null;
+  proposal: string | number | boolean | string[] | null; context: Record<string, string>; refs: string[]; jobs: string[];
   field: { type: string; options?: {text: string; value: string}[]; profile_text?: string };
 }
 export interface EasyReview { id: string; job_url: string; digest: string; payload: string; }
@@ -271,7 +271,7 @@ export const getEasyFacts = () => request<Record<string, {value: unknown}>>("/ea
 export const getEasyChannel = () => request<{suspended: number; reason: string}>("/easy/channel");
 export const verifyEasySession = () => request<{success: boolean}>("/easy/channel/resume", {method: "POST"});
 export const proposeEasyAnswer = (id: number) => request<{supported?: boolean; message?: string}>(`/easy/answers/${id}/propose`, {method: "POST"});
-export const approveEasyAnswer = (id: number, value: string | boolean | number, salary_context?: {currency: string; period: string}) => request(`/easy/answers/${id}/approve`, {method: "POST",body: JSON.stringify({value, ...(salary_context ? {salary_context} : {})})});
+export const approveEasyAnswer = (id: number, value: string | boolean | number | string[], salary_context?: {currency: string; period: string}) => request(`/easy/answers/${id}/approve`, {method: "POST",body: JSON.stringify({value, ...(salary_context ? {salary_context} : {})})});
 export const qualifyEasyJob = (job_url: string, evidence: string, fact_refs: string[], language: string, currency: string, period: string) =>
   request("/easy/qualify", {method: "POST",body: JSON.stringify({job_url,evidence,fact_refs,country:"BR",language,currency,period})});
 

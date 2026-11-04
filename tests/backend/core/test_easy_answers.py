@@ -168,6 +168,8 @@ def test_accommodation_questions_follow_the_accessibility_fact(tmp_path):
     assert b.resolve(text,br)['value']=='Não necessito de adaptações.'
     choice={'label':'Do you require any accommodations?','type':'select-one','options':[{'text':'Yes','value':'y'},{'text':'No','value':'n'}]}
     assert b.resolve(choice,dict(br,form_language='en'))['value']=='n'
+    testing={'label':'Outline how you would test a feature with:\nAn API integration\nAccessibility considerations','type':'textarea','options':[]}
+    assert 'pending' in b.resolve(testing,dict(br,form_language='en'))
     (tmp_path/'confirmed_facts.json').write_text(json.dumps({'facts':[]}))
     assert 'pending' in AnswerBook(tmp_path).resolve(text,br)
 
@@ -408,6 +410,9 @@ async def test_open_answer_uses_repository_files_and_invalidates_if_evidence_cha
     def model(req,**kwargs):
         payload=json.loads(req.data)
         assert ref in payload['format']['properties']['refs']['items']['enum']
+        # Contact facts crowded the question out of the 8b context and became the answer.
+        assert 'name.full' not in payload['format']['properties']['refs']['items']['enum']
+        assert json.loads(payload['messages'][1]['content'])['question']=='Describe an integration experiment'
         assert 'UNVERIFIED_MODEL_CLAIM' not in str(payload)
         assert 'professional' in payload['messages'][0]['content']
         return Response()

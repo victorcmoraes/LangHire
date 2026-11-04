@@ -10,6 +10,9 @@ def test_rejections_win_over_thanks_and_advances_are_detected():
     assert classify('Next steps','We would like to invite you to an interview. Please book a time on Calendly.')=='interview'
     assert classify('Desafio técnico','Gostaríamos que você realizasse o teste técnico na HackerRank.')=='assessment'
     assert classify('Thank you for applying to Encora','We have received your application.')=='received'
+    assert classify('[Job-31597] Senior Java Backend Developer, Brazil: Seu próximo desafio está aqui',
+                    'Convidamos você a responder algumas perguntas por meio do WhatsApp da Digaí. Responda a 4 perguntas técnicas.')=='assessment'
+    assert classify('Agradecemos por se candidatar no Jusbrasil','Olá, Victor!')=='received'
     assert classify('Security code for your application to RD Station','Copy and paste this code')=='verification'
     assert classify('Weekly newsletter','Top stories this week')=='unclassified'
 

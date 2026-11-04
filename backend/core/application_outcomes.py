@@ -21,12 +21,14 @@ STAGES=[
                 r'nao (?:seguiremos|vamos seguir|avancaremos|foi selecionad|foi possivel avancar)|nao seguir com (?:a )?sua candidatura|position has been filled|vaga (?:foi )?preenchida|'
                 r'not (?:been )?selected|will not be moving|optamos por (?:seguir|prosseguir) com|encerramos (?:o|este) processo|no longer considering'),
     ('assessment',r'\bassessment\b|coding challenge|technical (?:test|challenge)|take.?home|hackerrank|codility|codesignal|testgorilla|'
-                  r'teste (?:tecnico|online|de logica)|desafio tecnico|case tecnico|avaliacao tecnica|teste de perfil'),
+                  r'teste (?:tecnico|online|de logica)|desafio tecnico|case tecnico|avaliacao tecnica|teste de perfil|'
+                  # CI&T's screening: timed technical questions over WhatsApp with Digai.
+                  r'\bdigai\b|perguntas tecnicas|technical questions'),
     ('interview',r'\binterview\b|\bentrevista\b|schedule (?:a|an|your) (?:call|chat|conversation|meeting)|book a time|calendly|'
                  r'would like to (?:invite|speak|talk|chat)|gostariamos de (?:convidar|conversar|agendar)|agendar (?:uma )?(?:conversa|call|bate papo)|'
                  r'disponibilidade para (?:uma )?(?:conversa|call|bate papo)'),
     ('received',r'received your application|thank(?:s| you) for (?:applying|your application|your interest)|application (?:has been|was) (?:received|submitted|sent)|'
-                r'your application (?:to|for)|recebemos (?:a )?sua candidatura|agradecemos (?:a )?(?:sua )?candidatura|obrigad[oa] por (?:se candidatar|sua candidatura|seu interesse)|candidatura (?:foi )?(?:recebida|enviada|realizada)|'
+                r'your application (?:to|for)|recebemos (?:a )?sua candidatura|agradecemos (?:a )?(?:sua )?candidatura|agradecemos por se candidatar|obrigad[oa] por (?:se candidatar|sua candidatura|seu interesse)|candidatura (?:foi )?(?:recebida|enviada|realizada)|'
                 r'inscricao (?:foi )?(?:recebida|realizada|confirmada)'),
 ]
 RANK={'verification':0,'unclassified':0,'received':1,'rejected':2,'assessment':3,'interview':4}

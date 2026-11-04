@@ -123,6 +123,9 @@ def experience_question(question):
                           r'|(?:possui|tem) (?:experiencia|conhecimento|vivencia)|worked with|trabalh\w* com', q))
 
 
+NARRATIVE_FACTS=('experience','skills','level','languages','education','certification','employer','employment.title')
+
+
 def narrative_field(field):
     if field.get('options') or salary_question(field['label']):return False
     return field.get('type') == 'textarea' or (field.get('type') == 'text' and bool(re.search(
@@ -364,7 +367,8 @@ class AnswerBook:
             if field.get('options'):
                 choices=[o['value'] for o in field['options'] if re.fullmatch(r'(?:nao|no|none|nenhum\w*|nao (?:preciso|necessito)\w*.*|i (?:do not|don t) need\w*.*)',normalized(o['text']))]
                 if len(choices)==1:return {'value':choices if field['type']=='checkbox-group' else choices[0],'refs':['accessibility'],'source':'rule'}
-            elif field['type'] in ('text','textarea'):
+            # "Accessibility considerations" in a testing question is not a request for the candidate's needs.
+            elif field['type'] in ('text','textarea') and re.search(r'accommodat\w*|adaptac\w*|necessidade|\bneeds?\b|requir\w*',q):
                 return {'value':'Não necessito de adaptações.' if context.get('language')=='pt' else 'I do not need any accommodations.','refs':['accessibility'],'source':'rule'}
         # A yes/no declaration of working English is the confirmed level, not an experience claim.
         if re.search(r'(?:able|capaz) (?:to )?(?:communicate|comunicar)\w*.{0,30}(?:english|ingles)',q) and normalized(str(self.facts.get('level.english',{}).get('value',''))) in ('proficient','advanced','fluent','native'):
@@ -635,10 +639,13 @@ class AnswerBook:
     def candidate_sources(self, row):
         sources={ref:fact for ref,fact in self.facts.items() if ref not in ('employment.previous','relationships.employee')
                  or normalized(fact.get('scope',''))==normalized(row['context'].get('company',''))}
+        if narrative_field(row['field']):
+            # Identity, contact and demographic facts pushed the question out of the 8b context.
+            sources={ref:fact for ref,fact in sources.items() if ref.startswith(NARRATIVE_FACTS)}
         if row['field'].get('type') in ('text','textarea') and not row['field'].get('options') and not salary_question(row['question']):
             terms=set(normalized(row['question']).split())-{'que','de','em','uma','com','the','and','you','your','voce','para','como','nos','por','quais','experiencia','profissionalmente'}
             ranked=sorted(self.project_evidence.items(),key=lambda item:len(terms & set(normalized(item[1]['value']).split())),reverse=True)
-            for ref,evidence in ranked[:4]:sources[ref]=dict(evidence,value=evidence['value'][:2200])
+            for ref,evidence in ranked[:2]:sources[ref]=dict(evidence,value=evidence['value'][:1500])
         return sources
 
     async def generate(self, answer_id, settings, payload, purpose=None):
@@ -804,8 +811,8 @@ class AnswerBook:
                        'Facts with a company or country scope only apply in that scope; a scoped negative answer is not a global negative. '
                        'For numeric facts, use only explicitly supplied values; never infer years, nationality or country authorization. '
                        'Return supported=false,value=null,refs=[] only when no useful grounded answer can be drafted. Human approval is always required.'},
-                                {'role': 'user', 'content': json.dumps({'field': row['field'], 'context': row['context'], 'sources': sources,
-                                    'job':{k:str((job or {}).get(k,''))[:6000] for k in ('title','company','location','description')}})}]}
+                                {'role': 'user', 'content': json.dumps({'question': row['question'], 'field': row['field'], 'context': row['context'], 'sources': sources,
+                                    'job':{k:str((job or {}).get(k,''))[:2500] for k in ('title','company','location','description')}})}]}
         async def generate(request_payload=None,purpose=None):
             return await self.generate(answer_id,settings,request_payload or payload,purpose)
         result = await generate()

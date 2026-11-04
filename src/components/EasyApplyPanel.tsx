@@ -6,14 +6,16 @@ import type { Job } from '../lib/types';
 import HumanInterventions from './HumanInterventions';
 
 function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: () => void }) {
-  const [value, setValue] = useState<string | boolean | number>(question.proposal ?? question.answer ?? (question.field.type === 'checkbox' ? false : ''));
+  const empty = question.field.type === 'checkbox' ? false : question.field.type === 'checkbox-group' ? [] : '';
+  const [value, setValue] = useState<string | boolean | number | string[]>(question.proposal ?? question.answer ?? empty);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [currency, setCurrency] = useState(question.context.currency || '');
   const [period, setPeriod] = useState(question.context.period || '');
   const isSalary = /salary|salari|remunera|pretensao|renda|taxa hora/.test(question.question.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase());
-  useEffect(() => { setValue(question.proposal ?? question.answer ?? (question.field.type==='checkbox'?false:'')); }, [question.proposal,question.answer,question.field.type]);
+  useEffect(() => { setValue(question.proposal ?? question.answer ?? empty); }, [question.proposal,question.answer,question.field.type]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chosen = Array.isArray(value) ? value.map(String) : [];
   const perform = async (action: () => Promise<unknown>) => {
     setBusy(true); setError(''); setNotice('');
     try { await action(); refresh(); } catch (e) {setError(String(e));} finally {setBusy(false);}
@@ -22,7 +24,10 @@ function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: ()
     <p className="font-semibold">{question.question}</p>
     {question.field.profile_text && <pre className="whitespace-pre-wrap text-sm">{question.field.profile_text}</pre>}
     <p className="text-sm">{question.state} · {question.jobs.length} candidatura(s) · {JSON.stringify(question.context)}</p>
-    {question.field.options?.length ? <select aria-label={question.question} value={String(value)} onChange={e=>setValue(e.target.value)} className="input-base">
+    {question.field.type==='checkbox-group' && question.field.options?.length ? <fieldset aria-label={question.question}>
+      {question.field.options.map(o=><label key={o.value} className="block"><input type="checkbox" checked={chosen.includes(String(o.value))}
+        onChange={e=>setValue(e.target.checked ? [...chosen,String(o.value)] : chosen.filter(v=>v!==String(o.value)))}/> {o.text}</label>)}
+    </fieldset> : question.field.options?.length ? <select aria-label={question.question} value={String(value)} onChange={e=>setValue(e.target.value)} className="input-base">
       <option value="">Selecione</option>{question.field.options.map(o=><option key={o.value} value={o.value}>{o.text}</option>)}
     </select> : question.field.type==='checkbox' ? <label><input type="checkbox" checked={value===true} onChange={e=>setValue(e.target.checked)}/> Sim</label>
       : question.field.type==='textarea' ? <textarea aria-label={question.question} className="input-base" rows={5} value={String(value)} onChange={e=>setValue(e.target.value)}/>
@@ -35,7 +40,7 @@ function AnswerCard({ question, refresh }: { question: EasyQuestion; refresh: ()
     </div>}
     {isSalary && (!currency || !period) && <p className="text-sm">Confirma a moeda e o período para salvar este valor no contexto certo.</p>}
     <div className="flex gap-3"><button className="btn-secondary mr-2" disabled={busy} onClick={()=>void perform(async()=>{const result=await proposeEasyAnswer(question.id);if(result.message)setNotice(result.message);else if(result.supported===false)setNotice('Faltam fatos no cadastro. Informe a resposta para confirmar.');})}>Propor com 8b</button>
-      <button className="btn-secondary mr-2" disabled={busy || value==='' || (isSalary && (!/^[A-Z]{3}$/.test(currency) || !period))} onClick={()=>void perform(()=>isSalary ? approveEasyAnswer(question.id,value,{currency,period}) : approveEasyAnswer(question.id,value))}>Confirmar e reutilizar</button></div>
+      <button className="btn-secondary mr-2" disabled={busy || value==='' || (Array.isArray(value) && !value.length) || (isSalary && (!/^[A-Z]{3}$/.test(currency) || !period))} onClick={()=>void perform(()=>isSalary ? approveEasyAnswer(question.id,value,{currency,period}) : approveEasyAnswer(question.id,value))}>Confirmar e reutilizar</button></div>
     {question.refs.length>0 && <p className="text-xs">Fatos: {question.refs.join(', ')}</p>}
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
