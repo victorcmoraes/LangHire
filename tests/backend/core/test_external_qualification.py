@@ -115,3 +115,17 @@ def test_home_region_and_salary_floor_come_from_confirmed_facts():
     assert home_cities({'location.commuteCities':{'value':['Olinda','Recife']},'location.city':{'value':'Olinda'}})==['Olinda','Recife']
     from core.external_discovery import candidate_location
     assert candidate_location({'location':'Recife, PE'},['Recife']) and not candidate_location({'location':'Recife, PE'},['Olinda'])
+
+def test_remote_latin_america_or_worldwide_covers_brazil_unless_excluded():
+    for location in ('Latin America (Remote)','Remote - LATAM','Worldwide (Remote)','Remote, Anywhere','América Latina - Remoto'):
+        decision=qualify(job('Requirements:\nJava',location=location),FACTS)
+        assert decision['state']=='eligible',location
+        assert any(e.startswith('regional_remote=') for e in decision['evidence'])
+    assert qualify(job('Requirements:\nJava',title='Backend Engineer (LATAM)',location='Remote'),FACTS)['state']=='eligible'
+    assert qualify(job('Requirements:\nJava',title='Global Backend Engineer',location='Remote'),FACTS)['reason']=='geographic_eligibility_needs_evidence'
+    for location in ('Remote - Americas','Anywhere in the US (Remote)','Remote - LATAM, Mexico','US - remote'):
+        assert qualify(job('Requirements:\nJava',location=location),FACTS)['reason']=='geographic_eligibility_needs_evidence',location
+    excluded=job('Open to LATAM except Brazil and Venezuela.\nRequirements:\nJava',location='Latin America (Remote)')
+    assert qualify(excluded,FACTS)['reason']=='brazil_excluded_by_posting'
+    # A regional label does not make an unstated arrangement remote.
+    assert qualify(job('Requirements:\nJava',location='Latin America'),FACTS)['reason']=='working_arrangement_needs_evidence'

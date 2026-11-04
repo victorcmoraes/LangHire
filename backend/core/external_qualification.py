@@ -117,7 +117,18 @@ def qualify(job,facts,tracks=None):
     places=[p.strip() for p in location.split(';') if p.strip()]
     brazilian_states=bool(places) and all(re.fullmatch(r'[^,;]+,\s*(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)',p) for p in places)
     explicit_brazil=brazilian_states or arrangement.get('brazil')=='allowed' or country=='BR' or bool(re.search(r'\bBrazil\b|\bBrasil\b',location,re.I)) or bool(home_policy)
-    if not explicit_brazil:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)]+quotes)
+    # A remote job open to all of Latin America or worldwide covers a Brazilian resident unless it excludes Brazil.
+    # "Americas" stays pending: postings use it for the US and Canada as often as for the whole continent.
+    excluded=re.search(r'(?:except|excluding|exclude[sd]?|exceto|excluindo|not (?:open|available|eligible) (?:to|in|for))[^.\n]{0,80}\bbra[sz]il\b',normalized(description))
+    if excluded:return result('discarded','brazil_excluded_by_posting',[excluded[0]]+quotes)
+    regional=None
+    if not explicit_brazil:
+        named_elsewhere=re.search(r'\b(?:us|usa|united states|canada|europe|emea|uk|united kingdom|apac|india|mexico|colombia|argentina|chile|peru)\b',normalized(location))
+        latam=r'latam|latin america|america latina|south america|america do sul'
+        regional=None if named_elsewhere else (re.search(r'\b(?:'+latam+r'|worldwide|anywhere(?! in\b)|global)\b',normalized(location))
+                                               or re.search(r'\b(?:'+latam+r')\b',normalized(title)))
+    if not explicit_brazil and not regional:return result('pending','geographic_eligibility_needs_evidence',[location,'country='+str(country)]+quotes)
+    if regional:quotes=quotes+['regional_remote='+regional[0]]
     salary=job.get('salaryRange') or {}
     floor=facts.get('salary.minimumBrlMonthly',{}).get('value')
     if isinstance(floor,(int,float)) and salary.get('currency')=='BRL' and salary.get('interval') in ('month','monthly') and salary.get('max',float('inf'))<floor:
