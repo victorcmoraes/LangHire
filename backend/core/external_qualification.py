@@ -150,7 +150,8 @@ def triage(data_dir):
             decision={'state':'protected','reason':'existing_confirmed_uncertain_or_active','evidence':[old['url']],'fact_refs':[]}
         elif key not in current:
             board=boards.get(key[:2],{})
-            if 'closed_imported' in board:decision={'state':'closed','reason':'not_in_current_complete_public_board','evidence':[],'fact_refs':[]}
+            if key[2] in board.get('posting_not_found',[]):decision={'state':'closed','reason':'posting_not_found','evidence':[],'fact_refs':[]}
+            elif 'closed_imported' in board:decision={'state':'closed','reason':'not_in_current_complete_public_board','evidence':[],'fact_refs':[]}
             else:
                 decision=qualify(job,book.facts,tracks)
                 if decision['state']=='eligible':decision.update(state='pending',reason='availability_not_confirmed')

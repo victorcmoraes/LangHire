@@ -53,6 +53,7 @@ def test_failed_or_partial_board_never_closes_missing_jobs(tmp_path,monkeypatch)
     (tmp_path/'external/board-registry.json').unlink()
     monkeypatch.setattr('core.external_discovery.refresh_board',lambda *args:[])
     monkeypatch.setattr('core.external_discovery.scoped_board',lambda *args:([],{}))
+    monkeypatch.setattr('urllib.request.urlopen',fail)
     result=discover(tmp_path)
     assert result['catalog_jobs']==1 and 'closed_imported' not in result['boards'][0]
 

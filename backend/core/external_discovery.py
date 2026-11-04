@@ -12,7 +12,7 @@ from filelock import FileLock
 
 from .cornerstone import board_parts,url_parts
 from .application_safety import SafetyError,now,job_key
-from .external_catalog import refresh_board,identity,lever_job
+from .external_catalog import refresh_board,identity,lever_job,check_missing_jobgether
 from .external_qualification import home_cities,qualify,triage
 from .job_tracks import load_job_tracks,matches_track
 from .easy_answers import AnswerBook
@@ -129,6 +129,8 @@ def discover(data,boards=(),max_new=5000,workers=3,aggregator_pages=5):
             info=dict(board,active_public=len(rows),active_imported=retained,added=added,checked_at=now())
             if key==('lever','jobgether'):
                 info.update(scope)
+                info.update(check_missing_jobgether(previous,rows,metadata.get(key,{}).get('posting_not_found',[])))
+                previous={ident:j for ident,j in previous.items() if ident[:2]!=key or ident[2] not in info['posting_not_found']}
             else:info['closed_imported']=sum(ident[:2]==key and ident not in active for ident in previous)
             metadata[key]=info;reports.append(info)
             # Closure is valid only for a complete successful company board response.

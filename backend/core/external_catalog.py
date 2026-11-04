@@ -5,7 +5,8 @@ from html.parser import HTMLParser
 import json
 from pathlib import Path
 import re
-from urllib.parse import urlsplit
+from urllib.error import HTTPError
+from urllib.parse import quote,urlsplit
 import urllib.request
 from .cornerstone import board_parts,job_url
 
@@ -140,6 +141,26 @@ def refresh_board(platform,board):
     return result
 
 
+def check_missing_jobgether(previous,rows,closed=()):
+    """Only an individual 404 proves closure on this incomplete board; stop on other errors."""
+    active={identity(j) for j in rows};closed=set(closed)-{key[2] for key in active};checked=0;error={}
+    for key in sorted(previous):
+        if key[:2]!=('lever','jobgether') or key in active or key[2] in closed:continue
+        if checked>=150:break
+        url='https://api.lever.co/v0/postings/jobgether/'+quote(key[2],safe='')
+        req=urllib.request.Request(url,headers={'User-Agent':'LangHire-local-job-catalog/1.0','Accept':'application/json'})
+        checked+=1
+        try:
+            with urllib.request.urlopen(req,timeout=10) as response:
+                if response.status!=200:raise ValueError('Unexpected posting response: '+str(response.status))
+        except HTTPError as failure:
+            if failure.code==404:closed.add(key[2]);continue
+            error={'posting_check_error':type(failure).__name__,'posting_check_http_status':failure.code};break
+        except Exception as failure:
+            error={'posting_check_error':type(failure).__name__};break
+    return dict(posting_not_found=sorted(closed),posting_checks=checked,**error)
+
+
 def merge_filtered_jobgether(data_dir):
     """Recover the imported Brazilian subset without downloading a global aggregator."""
     data_dir=Path(data_dir);path=data_dir/'external/catalog.json'
@@ -162,6 +183,11 @@ def merge_filtered_jobgether(data_dir):
 def refresh_imported(data_dir):
     data_dir=Path(data_dir);jobs=json.loads((data_dir/'jobs.json').read_text(encoding='utf-8'))
     previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable')}
+    path=data_dir/'external/catalog.json'
+    catalog=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'jobs':[],'boards':[]}
+    known={identity(j):j for j in catalog['jobs'] if identity(j)[:2]==('lever','jobgether')}
+    known.update({key:j for key,j in previous.items() if key[:2]==('lever','jobgether')})
+    closed=next((b.get('posting_not_found',[]) for b in catalog['boards'] if (b['platform'],b['board'])==('lever','jobgether')),[])
     boards=sorted({(key[0],key[1]) for key in previous if key[1]})
     result={'imported_unique':len(previous),'boards':[],'jobs':[]}
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -173,8 +199,11 @@ def refresh_imported(data_dir):
                 retained=[dict(j,legacy=previous[identity(j)]) for j in rows if identity(j) in previous]
                 result['jobs'].extend(retained)
                 details={'platform':platform,'board':board,'active_public':len(rows),'active_imported':len(retained)}
-                if board=='jobgether':details.update(scope='public location=Brazil, first 100; missing entries not declared closed',
-                    not_refreshed_imported=sum(k not in active for k in previous if k[:2]==(platform,board)))
+                if (platform,board)==('lever','jobgether'):
+                    details.update(scope='public location=Brazil, first 100; closure requires individual 404',
+                        **check_missing_jobgether(known,rows,closed))
+                    result['jobs'].extend(j for key,j in known.items() if key not in active and key[2] not in details['posting_not_found'])
+                    details['not_refreshed_imported']=sum(k not in active and k[2] not in details['posting_not_found'] for k in known)
                 else:details['closed_imported']=sum(k not in active for k in previous if k[:2]==(platform,board))
                 result['boards'].append(details)
             except Exception as error:result['boards'].append({'platform':platform,'board':board,'error':type(error).__name__})
