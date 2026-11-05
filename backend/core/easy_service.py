@@ -36,7 +36,10 @@ async def collect(data, profile, title, limit, filters, status):
     city = book.facts.get('location.city', {}).get('value', '')
     country = book.facts.get('location.country', {}).get('value', '')
     # A regional search ("Latin America", "Worldwide") finds remote jobs open beyond the candidate's country.
-    params = {'keywords': title or 'backend developer', 'location': filters.get('location') or country or city, 'f_AL': 'true'}
+    # apply_mode=external also keeps postings whose "Apply" leaves LinkedIn; their destination finds new ATS boards.
+    external = filters.get('apply_mode') == 'external'
+    params = {'keywords': title or 'backend developer', 'location': filters.get('location') or country or city}
+    if not external: params['f_AL'] = 'true'
     for key, param in {'date_posted':'f_TPR','experience_level':'f_E','work_type':'f_WT','job_type':'f_JT'}.items():
         if filters.get(key): params[param] = str(filters[key])
     jobs = read_jobs()
@@ -69,8 +72,10 @@ async def collect(data, profile, title, limit, filters, status):
                 if card_title and (tracks['exclude'].search(normalized(card_title)) or not matches_track(card_title,tracks)): continue
                 await page.goto(url,wait_until='domcontentloaded')
                 button = page.get_by_role('button',name=EASY)
-                try: await button.first.wait_for(timeout=15000)
-                except Exception: continue
+                try: await button.first.wait_for(timeout=6000 if external else 15000)
+                except Exception:
+                    if external: await collect_external(page, url, title, existing, status)
+                    continue
                 metadata=await read_job_metadata(page)
                 title_text,text,location_text,company=(metadata[k] for k in ('title','description','location','company'))
                 # Collection never asserts that an unreviewed description proves eligibility.
@@ -84,6 +89,48 @@ async def collect(data, profile, title, limit, filters, status):
                     status['collected']-=1
                     continue
                 print('Collected Easy Apply:',title_text,flush=True)
+
+
+APPLY = re.compile(r'^(candidatar-se|candidate-se|apply|apply now|aplicar)$', re.I)
+
+
+async def external_destination(page):
+    """Where LinkedIn's off-site Apply leads: a plain link is read; otherwise the opened tab's URL is read and closed."""
+    from urllib.parse import parse_qs, urlsplit
+    control = page.get_by_role('link', name=APPLY).or_(page.get_by_role('button', name=APPLY)).first
+    await control.wait_for(timeout=8000)
+    href = await control.get_attribute('href') or ''
+    host = urlsplit(href).hostname or ''
+    if href.startswith('http') and not host.endswith('linkedin.com'):return href
+    target = parse_qs(urlsplit(href).query).get('url', [''])[0]
+    if target:return target
+    async with page.context.expect_page(timeout=15000) as opened:
+        await control.click()
+        # Some layouts confirm leaving LinkedIn first.
+        proceed = page.get_by_role('button', name=re.compile(r'^(continue|continuar)$', re.I))
+        try: await proceed.first.click(timeout=3000)
+        except Exception: pass
+    tab = await opened.value
+    try:
+        await tab.wait_for_load_state('domcontentloaded', timeout=20000)
+        return tab.url
+    finally: await tab.close()
+
+
+async def collect_external(page, url, title, existing, status):
+    from .shared_config import add_collected_job
+    try: destination = await external_destination(page)
+    except Exception: return
+    metadata = await read_job_metadata(page)
+    job = {'url':url,'title':metadata['title'],'company':metadata['company'],'location':metadata['location'],
+           'description':metadata['description'],'workplaceType':metadata.get('workplaceType',''),'easy_apply':False,
+           'external_url':destination,'status':'blocked','easy_result':'external_apply',
+           'error':'Applies outside LinkedIn; its hosted ATS board is found by `cli.external sources`',
+           'source':'linkedin','search_title':title or '','qualification':None}
+    existing.add(url)
+    if add_collected_job(job):
+        status['collected_external'] = status.get('collected_external', 0)+1
+        print('Collected external:', metadata['title'], '->', destination, flush=True)
 
 
 async def run_jobs(data, body, status):

@@ -34,3 +34,16 @@ An authorized feed or explicit platform permission would allow revisiting the
 collection gate. Assisted applications would still require browser validation,
 human-only assessment handling and a separately approved pilot. Platform access
 and submission support remain unchanged by this document.
+
+## Decision update — 2026-11-05
+
+The user reviewed the restriction above and chose to collect from Gupy anyway, for personal use and low
+volume, accepting the terms risk. Collection reads only public pages, without login:
+
+- `portal.gupy.io/job-search/...` (server-rendered search), via `cli.external sources --source gupy`
+- each company's career page `{company}.gupy.io` and posting `{company}.gupy.io/jobs/{id}`, via `refresh_board('gupy', company)`
+
+Applications stay human. The Apply Assist extension opens `/candidates/jobs/{id}/apply`. The candidate logs
+in with their own Gupy account and finalizes the application. The extension fills only empty controls in each
+step. Assessments and video stages remain human tasks. Nothing submits automatically, and the automatic
+runner (`run_external`) still refuses Gupy.

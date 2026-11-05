@@ -136,13 +136,14 @@ def test_workable_blocked_api_requires_human_review_and_caches_failure(tmp_path,
     assert len(calls)==1 and not (tmp_path/'external/board-registry.json').exists()
 
 
-async def test_discovered_workable_jobs_are_qualified_but_skipped_by_queue_and_run(tmp_path,monkeypatch):
+async def test_discovered_workable_jobs_reach_the_assist_queue_but_never_the_automatic_run(tmp_path,monkeypatch):
     seed(tmp_path);public_api(monkeypatch,[posting()])
     report=discover(tmp_path,['workable:fixture'])
     assert report['new_jobs']==1 and report['new_qualification']=={'eligible':1}
     jobs=json.loads((tmp_path/'jobs.json').read_text())
     assert jobs[URL]['collection_origin']=='public_workable_board'
-    assert queue(tmp_path)==[]
+    # The shared queue feeds the human-submitted Apply Assist chain; the automatic runner still refuses Workable.
+    assert [j['url'] for j in queue(tmp_path)]==[URL]
     assert discover(tmp_path)['new_jobs']==0
     refreshed=refresh_imported(tmp_path)
     assert len(refreshed['jobs'])==1 and refreshed['boards'][0]['platform']=='workable'
@@ -163,7 +164,7 @@ def test_triage_includes_collected_workable_jobs(tmp_path,monkeypatch):
     discover(tmp_path,['workable:fixture'])
     result=triage(tmp_path)
     assert [(d['platform'],d['state']) for d in result['decisions']]==[('workable','eligible')]
-    assert queue(tmp_path)==[]
+    assert [j['platform'] for j in queue(tmp_path)]==['workable']
 
 
 @pytest.mark.parametrize('execution',['review','submit'])

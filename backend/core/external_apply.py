@@ -54,6 +54,8 @@ def canonical_ats(url):
     if (re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.recruitee\.com',host)
             and re.fullmatch(r'/o/[A-Za-z0-9_-]+/?',p.path) and p.port in (None,443) and not p.username and not p.password):
         return 'https://'+host+p.path.rstrip('/')
+    if re.fullmatch(r'(?!login\.|portal\.|www\.)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.gupy\.io',host) and re.fullmatch(r'/jobs/\d+/?',p.path):
+        return 'https://'+host+p.path.rstrip('/')
     if host=='apply.workable.com' and re.fullmatch(r'/[\w-]+/j/[A-Za-z0-9]+(?:/apply)?/?',p.path):
         return 'https://'+host+p.path.rstrip('/').removesuffix('/apply')
     if host in ('jobs.lever.co','jobs.eu.lever.co') and re.fullmatch(r'/[\w-]+/[0-9a-f-]{36}(?:/apply)?/?',p.path,re.I):

@@ -44,8 +44,21 @@ def main():
     approve=sub.add_parser('approve-answer');approve.add_argument('--id',type=int,required=True)
     value=approve.add_mutually_exclusive_group(required=True);value.add_argument('--text');value.add_argument('--json-value');value.add_argument('--value-file',type=Path)
     approve.add_argument('--currency');approve.add_argument('--period',choices=('monthly','annual','hourly'))
-    assist=sub.add_parser('lever-assist',help="Serve answers to a bookmarklet in the candidate's own Chrome; the candidate solves the CAPTCHA and submits")
-    assist.add_argument('--no-open',action='store_true')
+    sources=sub.add_parser('sources',help='Find ATS boards of companies hiring in Brazil from aggregators and GitHub job boards')
+    sources.add_argument('--register',action='store_true',help='Register boards that have new eligible jobs')
+    sources.add_argument('--source',action='append',choices=('linkedin','gupy','github','himalayas','workable','getonbrd'))
+    sources.add_argument('--limit',type=int)
+    linkedin=sub.add_parser('linkedin-collect',help='Collect LinkedIn postings; --external also keeps off-site Apply destinations')
+    linkedin.add_argument('--title',action='append',required=True);linkedin.add_argument('--limit',type=int,default=10)
+    linkedin.add_argument('--location');linkedin.add_argument('--date-posted',default='r604800')
+    linkedin.add_argument('--work-type',default='2',help='LinkedIn f_WT: 1 on-site, 2 remote, 3 hybrid')
+    linkedin.add_argument('--external',action='store_true')
+    for name in ('assist','lever-assist'):
+        assist=sub.add_parser(name,help="Serve the whole queue to the Apply Assist extension in the candidate's own Chrome; the candidate reviews, solves any CAPTCHA and submits")
+        assist.add_argument('--no-open',action='store_true')
+        assist.add_argument('--platform',action='append',choices=('lever','greenhouse','gupy','ashby','workable','linkedin'),
+                            help='Limit and order the chain (repeatable); default: lever, greenhouse, gupy, ashby, workable, linkedin')
+        assist.add_argument('--write-extension',action='store_true',help='Regenerate the extension field inspectors and exit')
     diagnose=sub.add_parser('diagnose-lever');diagnose.add_argument('--job-url',required=True)
     preflight=sub.add_parser('preflight');preflight.add_argument('--limit',type=int,default=50)
     resolve=sub.add_parser('resolve-pending',help='Answer stored pending questions with the local model; no browser, no sends')
@@ -74,13 +87,14 @@ def main():
         from backend.core.automatic_answers import resolve_pending
         show=lambda row,state:print(json.dumps({'id':row['id'],'question':row['question'][:90],'result':state},ensure_ascii=False),flush=True)
         print(json.dumps(asyncio.run(resolve_pending(data,args.limit,show)),ensure_ascii=False,indent=2));return
-    if args.command=='lever-assist':
+    if args.command in ('assist','lever-assist'):
         from filelock import FileLock
-        from backend.core.lever_assist import serve
+        from backend.core.apply_assist import serve,write_extension,PLATFORMS
+        if args.write_extension:print(write_extension());return
         from backend.core.config import load_settings
         # Holding the worker lease keeps automatic runs from recovering the attempts the candidate is filling.
         with FileLock(str(data/'application-worker.lock'),timeout=0):
-            triage(data);serve(data,load_settings().get('resume_path',''),not args.no_open)
+            triage(data);serve(data,load_settings().get('resume_path',''),not args.no_open,args.platform or (['lever'] if args.command=='lever-assist' else PLATFORMS))
         return
     if args.command=='diagnose-lever':
         from filelock import FileLock
@@ -105,6 +119,17 @@ def main():
             report['platform_hold_preserved']=True
             report_path=data/'reports'/('lever-diagnostic-'+result['id']+'.json');report_path.write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
         print(json.dumps(report,ensure_ascii=False,indent=2));return
+    if args.command=='linkedin-collect':
+        from backend.core.easy_service import collect
+        from backend.core.config import load_profile
+        filters={'date_posted':args.date_posted,'work_type':args.work_type,'location':args.location,'apply_mode':'external' if args.external else None}
+        status={}
+        for title in args.title:asyncio.run(collect(data,load_profile(),title,args.limit,{k:v for k,v in filters.items() if v},status))
+        print(json.dumps({k:status.get(k,0) for k in ('collected','collected_external')}));return
+    if args.command=='sources':
+        from backend.core.job_sources import discover_sources
+        report=discover_sources(data,args.register,tuple(args.source or ('linkedin','gupy','github','himalayas','workable','getonbrd')),limit=args.limit)
+        print(json.dumps({k:v for k,v in report.items() if k!='boards'}|{'top':[{k:b.get(k) for k in ('platform','board','new_eligible_jobs','new_matching_jobs','sources')} for b in report['boards'][:25]]},ensure_ascii=False,indent=2));return
     if args.command=='discover':
         from backend.core.external_discovery import discover as discover_boards
         report=discover_boards(data,args.board,args.max_new,aggregator_pages=args.aggregator_pages)

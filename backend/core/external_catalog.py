@@ -123,8 +123,55 @@ def cornerstone_jobs(board):
         page+=1
 
 
+GUPY_MODES={'remote':'remote','hybrid':'hybrid','on-site':'on-site','onsite':'on-site'}
+
+
+def next_data(url):
+    """Gupy renders its public pages server-side; their data sits in Next.js's __NEXT_DATA__ block."""
+    req=urllib.request.Request(url,headers={'User-Agent':'Mozilla/5.0 (LangHire-local-job-catalog/1.0)','Accept':'text/html'})
+    with urllib.request.urlopen(req,timeout=40) as response:html=response.read().decode('utf-8')
+    match=re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>',html,re.S)
+    if not match:raise ValueError('Gupy page without __NEXT_DATA__')
+    return json.loads(match[1])['props']['pageProps']
+
+
+def gupy_job(item,board):
+    mode=GUPY_MODES.get(item.get('workplaceType') or '','')
+    place=', '.join(p for p in (item.get('addressCity'),item.get('addressStateShortName') or item.get('addressState')) if p)
+    location=(place or 'Brasil')+(' ('+mode+')' if mode else '')
+    description='\n\n'.join(plain(item.get(k) or '') for k in ('description','responsibilities','prerequisites','relevantExperiences'))
+    return {'platform':'gupy','source':'gupy','board':board,'company':(item.get('careerPage') or {}).get('name') or board,
+            'externalId':str(item['id']),'title':item['name'].strip(),'url':f'https://{board}.gupy.io/jobs/{item["id"]}',
+            'applyUrl':f'https://{board}.gupy.io/jobs/{item["id"]}','location':location,'workplaceType':mode,
+            # Gupy is a Brazilian ATS; postings name another country explicitly when they are elsewhere.
+            'country':item.get('addressCountryShortName') or 'BR','description':description,
+            'jobType':item.get('jobType'),'gupy_questions':item.get('questionForm'),'published_at':item.get('publishedAt')}
+
+
+def gupy_jobs(board,tracks=None):
+    """The company page lists every opening; details are fetched only for titles on the candidate's tracks."""
+    from .job_tracks import load_job_tracks,matches_track
+    tracks=tracks or load_job_tracks()
+    listing=next_data(f'https://{board}.gupy.io/').get('jobs') or []
+    result=[]
+    for item in listing:
+        workplace=item.get('workplace') or {};address=workplace.get('address') or {}
+        # Talent pools are not openings; applying there sends nothing to a hiring process.
+        if item.get('type')=='vacancy_type_talent_pool':continue
+        if not matches_track(item.get('title',''),tracks):
+            result.append({'platform':'gupy','source':'gupy','board':board,'company':board,'externalId':str(item['id']),
+                           'title':item.get('title',''),'url':f'https://{board}.gupy.io/jobs/{item["id"]}',
+                           'location':', '.join(p for p in (address.get('city'),address.get('stateShortName')) if p) or address.get('country',''),
+                           'workplaceType':GUPY_MODES.get(workplace.get('workplaceType') or '',''),'country':'BR','description':''})
+            continue
+        detail=next_data(f'https://{board}.gupy.io/jobs/{item["id"]}').get('job') or {}
+        if detail.get('status')=='published' and str(detail.get('id'))==str(item['id']):result.append(gupy_job(detail,board))
+    return result
+
+
 def refresh_board(platform,board):
     if platform=='cornerstone':return cornerstone_jobs(board)
+    if platform=='gupy':return gupy_jobs(board)
     url=(f'https://boards-api.greenhouse.io/v1/boards/{board}/jobs?content=true' if platform=='greenhouse'
          else f'https://api.ashbyhq.com/posting-api/job-board/{board}' if platform=='ashby'
          else f'https://www.workable.com/api/accounts/{board}?details=true' if platform=='workable'
@@ -204,7 +251,7 @@ def merge_filtered_jobgether(data_dir):
 
 def refresh_imported(data_dir):
     data_dir=Path(data_dir);jobs=json.loads((data_dir/'jobs.json').read_text(encoding='utf-8'))
-    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable','recruitee')}
+    previous={identity(j):j for j in jobs.values() if j.get('source') in ('lever','greenhouse','ashby','cornerstone','workable','recruitee','gupy')}
     path=data_dir/'external/catalog.json'
     catalog=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'jobs':[],'boards':[]}
     known={identity(j):j for j in catalog['jobs'] if identity(j)[:2]==('lever','jobgether')}

@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "LangHire Apply Assist",
+  "version": "2.0",
+  "description": "Walks the LangHire queue (Lever, Greenhouse, Gupy, Ashby, Workable, LinkedIn Easy Apply) in your own Chrome: fills confirmed answers; you review, solve any CAPTCHA and click Submit.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAoBVjaYyTJjoXKjwvIflQ2GUeQ0K26bn+6GHk+H4VJ4lUmlDZ9s1dZw4aIkYo0bO4K9zN9Vw2S2T8NxkePBN5HT1oHRuH9sKw6QTkInSir+FfOUzWgwE65DRwmQVfHjri5l3WxDc4apwPVCCbbEvp+Wo991ymeJMEnSdz8Gb9bca29mSX0zQC45e92nPL29AZY352E29CaNLNQWpvYiG75a2k7gfuwrBRCdHKPqYH/dwS+4mVZwSo9bJmClEyFcQh1aMyrNni7Difi5F5znHJcIwNVVRm3QOptT0iZ8X3m1W7XLoDhfdtWkHahWAttnaoFGj8dTeld9Z6kkHpYzecxwIDAQAB",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1:8799/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_title": "LangHire: preencher esta vaga ou abrir a próxima da fila"},
+  "content_scripts": [{
+    "matches": ["https://jobs.lever.co/*", "https://jobs.eu.lever.co/*", "https://job-boards.greenhouse.io/*",
+                "https://boards.greenhouse.io/*", "https://*.gupy.io/*", "https://jobs.ashbyhq.com/*", "https://apply.workable.com/*", "https://www.linkedin.com/*"],
+    "js": ["fields.js", "content.js"],
+    "run_at": "document_idle"
+  }]
+}

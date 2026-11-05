@@ -51,7 +51,7 @@ def queue(data):
     for decision in triage['decisions']:
         if decision['state']!='eligible':continue
         key=(decision['platform'],decision['board'],decision['externalId']);job=by.get(key)
-        if not job or job['platform'] not in ('lever','greenhouse','recruitee'):continue
+        if not job or job['platform'] not in ('lever','greenhouse','recruitee','gupy','ashby','workable'):continue
         if (job['platform'],job['board'].lower()) in excluded:continue
         title=core_title(job['title'])
         match=re.search(r'\b(?:job[\s-]*)?(\d{5})\b',job['title'],re.I)

@@ -39,6 +39,8 @@ def job_key(url):
     if host=='jobs.ashbyhq.com' and match:return 'ashby:'+match[1]+':'+match[2].lower()
     match=re.fullmatch(r'/([\w-]+)/j/([A-Za-z0-9]+)(?:/apply)?/?',parsed.path)
     if host=='apply.workable.com' and match:return 'workable:'+match[1].lower()+':'+match[2].upper()
+    match=re.fullmatch(r'/jobs/(\d+)/?',parsed.path)
+    if re.fullmatch(r'(?!login\.|portal\.|www\.)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.gupy\.io',host) and match:return 'gupy:'+host.split('.')[0]+':'+match[1]
     return host+parsed.path.rstrip('/').removesuffix('/apply').rstrip('/')
 
 
