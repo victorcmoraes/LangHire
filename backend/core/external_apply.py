@@ -274,6 +274,8 @@ async def execute_external(job,data,resume,execution='review',status=None,lease_
     from contextlib import nullcontext
     if job['platform'] not in ('lever','greenhouse','recruitee'):raise SafetyError('Unsupported hosted ATS; not using a generic agent')
     data=Path(data);job=dict(job,url=canonical_ats(job['url']),eligibility_country='BR',form_language='en')
+    from .resume_tailoring import resume_for
+    resume=await resume_for(data,job,Path(resume))
     contact=data/'pending-contact-verification.json'
     if execution=='submit' and contact.exists() and json.loads(contact.read_text(encoding='utf-8')).get('active'):
         raise SafetyError('Candidate email confirmation pending; no additional send')

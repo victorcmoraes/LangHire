@@ -11,7 +11,11 @@ def test_rejections_win_over_thanks_and_advances_are_detected():
     assert classify('Desafio técnico','Gostaríamos que você realizasse o teste técnico na HackerRank.')=='assessment'
     assert classify('Thank you for applying to Encora','We have received your application.')=='received'
     assert classify('[Job-31597] Senior Java Backend Developer, Brazil: Seu próximo desafio está aqui',
-                    'Convidamos você a responder algumas perguntas por meio do WhatsApp da Digaí. Responda a 4 perguntas técnicas.')=='assessment'
+                    'Convidamos você a responder algumas perguntas por meio do WhatsApp da Digaí. Responda a 4 perguntas técnicas.')=='screening'
+    assert classify('CI&T | Última chamada - Não fique de fora do Processo Seletivo [Job-31306] Senior IA Developer','')=='screening'
+    assert classify("Last Call - Don't Miss Out on the [Job-30394] Senior Fullstack Developer Selection Process",'')=='screening'
+    assert classify('CI&T | You are close to boosting your application for the [Job - 32337] Senior Java Developer','')=='screening'
+    assert classify('Next steps','Responda às perguntas técnicas no link abaixo.')=='assessment'
     assert classify('Agradecemos por se candidatar no Jusbrasil','Olá, Victor!')=='received'
     assert classify('Security code for your application to RD Station','Copy and paste this code')=='verification'
     assert classify('Weekly newsletter','Top stories this week')=='unclassified'
@@ -50,8 +54,20 @@ def test_scan_classifies_once_and_reports_the_funnel(tmp_path):
     assert tracker.scan()=={'scanned':2,'matched':1}
     assert tracker.scan()=={'scanned':0,'matched':0} and mailbox.fetched==['aa','bb']
     report=tracker.report()
-    assert report['total']=={'sent':1,'advanced':1,'rejected':0,'received_only':0,'no_reply':0,'advance_rate':1.0}
+    assert report['total']=={'sent':1,'advanced':1,'rejected':0,'received_only':0,'screening':0,'no_reply':0,'advance_rate':1.0}
     assert report['applications'][0]['stage']=='interview' and report['by_platform']['greenhouse']['advanced']==1
+
+
+def test_automated_screening_reminders_are_not_advancement(tmp_path):
+    store=AttemptStore(tmp_path)
+    url='https://jobs.lever.co/ciandt/1'
+    aid=store.begin(url);store.transition(aid,'confirmed','ok')
+    (tmp_path/'jobs.json').write_text(json.dumps({url:{'company':'ciandt','title':'[Job-31597] Senior Java Backend Developer','platform':'lever','applied_at':'2026-10-28T02:00:00+00:00'}}))
+    mailbox=FakeMailbox({'cc':('CI&T | Última chamada - Não fique de fora do Processo Seletivo [Job-31597] Senior Java Backend Developer',
+                               'CI&T <noreplyhiring@ciandt.com>','Responda à Digaí pelo WhatsApp. https://ciandt.com/br/pt-br/carreiras',1793300000)})
+    tracker=OutcomeTracker(tmp_path,mailbox);tracker.scan()
+    total=tracker.report()['total']
+    assert total['advanced']==0 and total['screening']==1 and total['advance_rate']==0
 
 
 def test_short_names_and_job_alerts_do_not_create_false_replies():

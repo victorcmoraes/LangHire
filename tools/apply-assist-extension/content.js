@@ -6,6 +6,8 @@
 
   const MARK = 'lh_assist';
   const CONFIRMED = /application (?:has been |was )?(?:successfully )?(?:submitted|received|sent)|we (?:have )?received your application|thank(?:s| you) for (?:applying|your application)|(?:candidatura|aplica[çc][ãa]o|inscri[çc][ãa]o) (?:foi )?(?:enviada|recebida)|agradecemos (?:a )?sua inscri[çc][ãa]o|candidatura (?:foi )?(?:realizada|finalizada|conclu[íi]da)|voc[êe] se candidatou/i;
+  // Lever's own receipt for a posting that already holds this candidate's application (e.g. a second Submit).
+  const ALREADY = /your application was already submitted|we received your previous application/i;
   const ERROR = /error verifying your application|unable to submit|application (?:was )?not submitted|there was an error|erro ao (?:enviar|verificar)|não foi possível enviar/i;
   const SUBMIT = /^(submit application|submit|enviar candidatura|enviar inscrição|finalizar candidatura|concluir candidatura)$/i;
   const NEXT = /^(next|continue|avançar|continuar|próximo)\b/i;
@@ -91,7 +93,8 @@
     e.blur();
   }
   async function resumeFile(name) {
-    const b64 = await api('/resume');
+    // The server tailors one PDF per job; the page URL picks it, and an unmatched URL (LinkedIn) gets the last planned job's.
+    const b64 = await api('/resume', {url: location.href});
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     return new File([bytes], name, {type: 'application/pdf'});
   }
@@ -170,8 +173,8 @@
   function verdict(p) {
     const path = location.pathname;
     if (p === 'lever') {
-      if (/\/thanks\/?$/.test(path)) return {done: true, region: document.body.innerText};
       const form = document.getElementById('application-form');
+      if (/\/thanks\/?$/.test(path) || (!form && ALREADY.test(document.body.innerText))) return {done: true, region: document.body.innerText};
       return {failed: !!form && ERROR.test(form.innerText), region: form ? form.innerText : ''};
     }
     if (p === 'greenhouse') {

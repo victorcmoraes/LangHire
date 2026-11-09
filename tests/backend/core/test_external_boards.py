@@ -39,7 +39,7 @@ def test_suggest_counts_new_eligibility_caches_calls_and_never_changes_registry_
     registry=(tmp_path/'external/board-registry.json').read_bytes();jobs=(tmp_path/'jobs.json').read_bytes()
     def fetch(platform,board):
         calls.append((platform,board))
-        if board=='second':return [job(board,4,title='Account Executive')]
+        if board=='second':return [job(board,4,title='Payroll Specialist')]
         return [job(board,2),job(board,3,location='United States'),job(board,5,description='Requirements:\n8 years of experience')]
     monkeypatch.setattr('core.external_boards.refresh_board',fetch)
     report=suggest_boards(tmp_path)
@@ -50,7 +50,7 @@ def test_suggest_counts_new_eligibility_caches_calls_and_never_changes_registry_
     assert not (tmp_path/'external/catalog.json').exists()
     suggest_boards(tmp_path)
     assert len(calls)==2
-    settings={'job_tracks':{'include':'account executive'}}
+    settings={'job_tracks':{'include':'payroll'}}
     (tmp_path/'settings.json').write_text(json.dumps(settings))
     report=suggest_boards(tmp_path)
     assert report['boards'][1]['validated'] and report['new_eligible_jobs']==1 and len(calls)==2

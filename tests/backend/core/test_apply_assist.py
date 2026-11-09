@@ -131,3 +131,11 @@ def test_extension_field_inspectors_and_origin_match_the_backend():
 def test_bookmarklet_script_embeds_the_field_inspector():
     js = lever_assist.script('secret')
     assert "'secret'" in js and 'data-langhire-external' in js and '__' not in js.replace('__proto__','')
+
+
+async def test_lever_already_submitted_receipt_confirms_the_attempt(tmp_path, monkeypatch):
+    a = assistant(tmp_path, monkeypatch)
+    await a.plan(URL, [])
+    text = ('Your application was already submitted.\nThank you for your continued interest in Acme!\n'
+            'We received your previous application on November 5, 2026.')
+    assert a.done(URL+'/apply', text)['state'] == 'confirmed'

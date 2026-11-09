@@ -6,7 +6,7 @@ import re
 from .application_safety import AttemptStore,job_key
 from .easy_answers import AnswerBook,normalized
 from .external_catalog import identity
-from .job_tracks import load_job_tracks,matches_track
+from .job_tracks import load_job_tracks,matches_track,non_engineering
 
 
 def required_text(description):
@@ -29,6 +29,7 @@ def qualify(job,facts,tracks=None):
     title=job['title'];description=job.get('description','');required=required_text(description)
     def result(state,reason,evidence):
         return {'state':state,'reason':reason,'evidence':evidence,'fact_refs':['location.country','location.city','location.state','skills','skills.confirmed','skills.commonExperienceAuthority','experience.years','business.activeEntityBR','experience.accounting','experience.productionML','availability.schedule','languages','level.english','level.spanish','level.german','level.french','level.italian','level.mandarin','level.japanese','level.dutch']}
+    if non_engineering(title):return result('discarded','non_engineering_role',[title])
     if not matches_track(title,tracks):return result('discarded','outside_tracks',[title])
     if tracks['exclude'].search(normalized(title)):return result('discarded','outside_seniority_or_specialty',[title])
     if not tracks['allow_mobile'] and re.search(r'\breact native\b|\bflutter\b|\bswiftui\b',normalized(title)):

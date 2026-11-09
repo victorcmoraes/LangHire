@@ -22,10 +22,26 @@ def job(title):
 
 
 @pytest.mark.parametrize('title',['Full Stack Engineer','Platform Engineer','Site Reliability Engineer','QA Automation',
-                                 'Mobile Developer','Data Scientist','Agentic AI / Python Engineer','Account Executive','2D Designer','Frontend Engineer'])
+                                 'Mobile Developer','Data Scientist','Agentic AI / Python Engineer','Frontend Engineer'])
 def test_explicit_all_tracks_accepts_specialties_without_changing_default(tmp_path,title):
     assert qualify(job(title),FACTS)['state']=='discarded'
     assert qualify(job(title),FACTS,rules(tmp_path,ALL_TRACKS))['state']=='eligible'
+
+
+@pytest.mark.parametrize('title',['AI Performance Video Designer','Cinematic AI Video Creator - Generative AI - (DTC Ads)',
+                                 'AI Product Concept Designer & Interior Stylist – Home Décor','AI Conversation Recording Contributor',
+                                 'AI Research Engineer (Agentic Reinforcement Learning)','Web Development Specialist - Freelance AI Trainer Project',
+                                 'Account Executive','2D Designer','Product Owner/IA','Líder Técnico de IA - Fábrica agentica'])
+def test_non_engineering_roles_are_discarded_however_broad_the_tracks(tmp_path,title):
+    tracks=rules(tmp_path,ALL_TRACKS)
+    assert not matches_track(title,tracks)
+    assert qualify(job(title),FACTS,tracks)['reason']=='non_engineering_role'
+
+
+@pytest.mark.parametrize('title',['Analista de Suporte Pleno (Developer L3)','Business Intelligence II','Back-end JR l Pesquisa e Desenvolvimento',
+                                 'Data Scientist - AI & Experimentation','AI Engineer (Enabling Team)'])
+def test_technical_titles_near_the_non_engineering_words_still_match(tmp_path,title):
+    assert matches_track(title,rules(tmp_path,ALL_TRACKS))
 
 
 @pytest.mark.parametrize('title',['Staff Software Engineer','Principal Platform Engineer','Master AI Engineer','Tech Lead FullStack',

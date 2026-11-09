@@ -63,6 +63,20 @@ def test_generic_title_at_another_company_is_not_a_duplicate_and_gh_alias_is_pro
     assert [j['externalId'] for j in queue(tmp_path)]==['2']
 
 
+def test_queue_skips_excluded_boards_and_non_engineering_titles_from_a_saved_triage(tmp_path):
+    from core.external_service import queue
+    (tmp_path/'external').mkdir()
+    jobs=[{'platform':'lever','source':'lever','board':board,'company':board,'externalId':str(i),'title':title,
+           'url':f'https://jobs.lever.co/{board}/{i}'} for i,board,title in
+          [(1,'acme','Backend Engineer'),(2,'acme','AI Performance Video Designer'),(3,'jobgether','Backend Engineer Pleno')]]
+    (tmp_path/'external/catalog.json').write_text(json.dumps({'jobs':jobs}))
+    (tmp_path/'external/triage.json').write_text(json.dumps({'decisions':[dict(j,state='eligible') for j in jobs]}))
+    (tmp_path/'external/board-registry.json').write_text(json.dumps({'version':1,'boards':[{'platform':'lever','board':'acme'}],
+                                                                       'excluded':[{'platform':'lever','board':'jobgether'}]}))
+    (tmp_path/'jobs.json').write_text(json.dumps({j['url']:j for j in jobs}))
+    assert [j['externalId'] for j in queue(tmp_path)]==['1']
+
+
 def test_receipt_reconciliation_updates_only_its_own_completed_status(tmp_path):
     from core.external_service import update_reconciled_status
     (tmp_path/'external').mkdir();path=tmp_path/'external/run-state.json'

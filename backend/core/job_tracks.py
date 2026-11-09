@@ -15,6 +15,19 @@ DEFAULT_JOB_TRACKS={
 }
 
 
+# Roles that are not software engineering however broad the configured tracks are: titles
+# carrying "AI" for design, video, data labeling, research, sales or support work produce no
+# technical interview. Applied to every caller of matches_track, not only the qualification.
+NON_ENGINEERING=re.compile(
+    r'\b(?:designer|video|creator|stylist|contributor|recording|writer|redator|copywriter|annotat\w*|tutor|trainer|'
+    r'research (?:scientist|engineer)|support (?:operations|technician)|customer support|help ?desk|consultor de solucoes|'
+    r'account executive|business operations|product owner|sap \w+|salesforce administrator|lider)\b')
+
+
+def non_engineering(title):
+    return bool(NON_ENGINEERING.search(normalized(title)))
+
+
 def load_job_tracks(data=None):
     path=Path(data)/'settings.json' if data is not None else None
     settings=json.loads(path.read_text(encoding='utf-8')) if path and path.exists() else {}
@@ -33,4 +46,4 @@ def load_job_tracks(data=None):
 
 
 def matches_track(title,rules):
-    return bool(rules['include'].search(normalized(title)))
+    return bool(rules['include'].search(normalized(title))) and not non_engineering(title)

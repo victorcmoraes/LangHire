@@ -5,13 +5,14 @@ for answers, fills what is confirmed, lists what is left for the candidate, and 
 shows after the candidate's own Submit click. Lever, Greenhouse, Gupy, Ashby, Workable and LinkedIn Easy Apply share one chain;
 there is no daily ceiling because every send is a human click."""
 import asyncio
+import hashlib
 import json
 import re
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .application_safety import AttemptStore, SafetyError, job_key
 from .easy_answers import AnswerBook, normalized
@@ -21,7 +22,8 @@ PORT = 8799
 # Fixed by the "key" in tools/apply-assist-extension/manifest.json.
 EXTENSION_ORIGIN = 'chrome-extension://flpmcolipdjehnjmhpkcamihempmdcic'
 BOOKMARKLET_ORIGINS = ('https://jobs.lever.co', 'https://jobs.eu.lever.co')
-CONFIRMED = re.compile(SUCCESS.pattern + r'|application (?:was )?sent|sua candidatura foi enviada|candidatura enviada', re.I)
+CONFIRMED = re.compile(SUCCESS.pattern + r'|application (?:was )?sent|sua candidatura foi enviada|candidatura enviada'
+                       r'|your application was already submitted|we received your previous application', re.I)
 SUPPORTED = ('text','email','tel','number','url','textarea','select-one','checkbox','radio','checkbox-group','search','autocomplete')
 PLATFORMS = ('lever', 'greenhouse', 'gupy', 'ashby', 'workable', 'linkedin')
 METRICS = lambda: {'rule':0,'cache':0,'pending':0,'model':0,'autonomous':0}
@@ -63,6 +65,22 @@ class Assistant:
         self.platforms = tuple(platforms)
         self.skipped_path = self.data/'external'/'assist-skipped.json'
         self.jobs = {}
+        # Resume built for each planned job; the extension fetches the one matching its page.
+        self.tailored = {};self.current = self.resume
+
+    async def prepare_resume(self, job):
+        """This job's tailored PDF when tailoring is on; the configured PDF otherwise or when the build fails."""
+        from .resume_tailoring import resume_for
+        path = await resume_for(self.data, job, self.resume)
+        self.tailored[job_key(job['url'])] = path;self.current = path
+        return path
+
+    def resume_bytes(self, url=None):
+        path = None
+        if url:
+            try:path = self.tailored.get(job_key(canonical(url)))
+            except SafetyError:path = None
+        return (path or self.current).read_bytes()
 
     def skipped(self):
         keys = set()
@@ -137,12 +155,14 @@ class Assistant:
         job = dict(job, url=canonical(url))
         job.setdefault('eligibility_country', 'BR');job.setdefault('form_language', 'en' if platform == 'lever' else 'unknown')
         book = AnswerBook(self.data);metrics = METRICS()
+        resume = await self.prepare_resume(job)
         if platform == 'greenhouse':fills, pending = await self.greenhouse(book, job, fields, metrics)
         else:fills, pending = await self.generic(book, job, fields, metrics, platform)
         aid = self.attempt(job['url'])
         self.store.event(aid, 'assisted_fill', {'platform':platform, 'step':step,
             'answers':[{'question':f['label'],'value':f['value'],'source':f.get('source','rule')} for f in fills],
-            'pending':pending, 'metrics':metrics})
+            'pending':pending, 'metrics':metrics, 'resume':{'name':resume.name, 'path':str(resume),
+            'sha256':hashlib.sha256(resume.read_bytes()).hexdigest()}})
         return {'fills':fills, 'pending':pending, 'title':job.get('title'), 'company':job.get('company'), 'platform':platform}
 
     async def generic(self, book, job, fields, metrics, platform):
@@ -156,7 +176,7 @@ class Assistant:
             if kind == 'file':
                 purpose = normalized(' '.join(str(field.get(k,'')) for k in ('id','name','label')))
                 if re.search(r'resume|curriculo|\bcv\b', purpose) and not re.search(r'cover|carta|additional|outro', purpose):
-                    fills.append(dict(field, value=self.resume.name))
+                    fills.append(dict(field, value=self.current.name))
                 elif field['required']:pending.append(field['label'])
                 continue
             if kind == 'location':
@@ -194,7 +214,7 @@ class Assistant:
                 continue
             field = dict(field, value=live.get('value', ''), render=live.get('render', ''))
             if field['type'] == 'file':
-                if field['id'] == 'resume':fills.append(dict(field, value=self.resume.name, targets=[field['id']]))
+                if field['id'] == 'resume':fills.append(dict(field, value=self.current.name, targets=[field['id']]))
                 elif field['required']:pending.append(field['label'])
                 continue
             if field['id'] == 'phone' and not field['required']:continue
@@ -230,6 +250,7 @@ class Assistant:
             else:self.store.transition(attempt['id'], 'uncertain', 'Candidate submitted without a recognizable confirmation page')
             result = self.store.get(attempt['id']);state = result['state']
             self.project(url, result)
+            self.interview_sheet(url)
         return dict(self.next(), state=state)
 
     def project(self, url, result):
@@ -247,6 +268,14 @@ class Assistant:
         else:
             from .external_service import update_projection
             update_projection(job, result, self.data)
+
+    def interview_sheet(self, url):
+        """Refresh the job's interview sheet now that its answers were sent; never blocks the queue."""
+        from .resume_tailoring import tailoring_enabled, write_sheet
+        job = self.jobs.get(job_key(url))
+        if job is None or not tailoring_enabled(self.data):return
+        try:write_sheet(self.data, dict(job, url=url))
+        except Exception as error:print(json.dumps({'interview_sheet_failed':type(error).__name__, 'url':url}), flush=True)
 
     def submitted(self, url):
         attempt = self.waiting(canonical(url))
@@ -321,7 +350,9 @@ def serve(data, resume, open_first=True, platforms=PLATFORMS):
             if not self.allowed():return self.reply(403, {'error':'forbidden'})
             with lock:
                 if path == '/next':return self.reply(200, assistant.next())
-                if path == '/resume':return self.reply(200, assistant.resume.read_bytes(), 'application/pdf')
+                if path == '/resume':
+                    url = parse_qs(urlsplit(self.path).query).get('url', [None])[0]
+                    return self.reply(200, assistant.resume_bytes(url), 'application/pdf')
             self.reply(404, {'error':'not found'})
 
         def do_POST(self):
@@ -331,7 +362,7 @@ def serve(data, resume, open_first=True, platforms=PLATFORMS):
             try:
                 with lock:
                     if path == '/next':return self.reply(200, assistant.next())
-                    if path == '/resume':return self.reply(200, assistant.resume.read_bytes(), 'application/pdf')
+                    if path == '/resume':return self.reply(200, assistant.resume_bytes(body.get('url')), 'application/pdf')
                     if path == '/status':
                         try:job = assistant.job(body['url']);return self.reply(200, {'queued':True, 'platform':job['platform']})
                         except SafetyError:return self.reply(200, {'queued':False})

@@ -20,10 +20,12 @@ STAGES=[
     ('rejected',r'unfortunately|infelizmente|not (?:to )?(?:move|moving) forward|decided to (?:move|proceed|continue) with other|other candidates|outros candidatos|'
                 r'nao (?:seguiremos|vamos seguir|avancaremos|foi selecionad|foi possivel avancar)|nao seguir com (?:a )?sua candidatura|position has been filled|vaga (?:foi )?preenchida|'
                 r'not (?:been )?selected|will not be moving|optamos por (?:seguir|prosseguir) com|encerramos (?:o|este) processo|no longer considering'),
+    # Automated screenings every applicant receives (CI&T's Digai questions over WhatsApp, and
+    # its "last call" reminders): a step to take, not evidence that a person advanced the application.
+    ('screening',r'\bdigai\b|ultima chamada|last call|close to boosting your application|seu proximo desafio esta aqui|queremos saber mais sobre voce'),
     ('assessment',r'\bassessment\b|coding challenge|technical (?:test|challenge)|take.?home|hackerrank|codility|codesignal|testgorilla|'
                   r'teste (?:tecnico|online|de logica)|desafio tecnico|case tecnico|avaliacao tecnica|teste de perfil|'
-                  # CI&T's screening: timed technical questions over WhatsApp with Digai.
-                  r'\bdigai\b|perguntas tecnicas|technical questions'),
+                  r'perguntas tecnicas|technical questions'),
     ('interview',r'\binterview\b|\bentrevista\b|schedule (?:a|an|your) (?:call|chat|conversation|meeting)|book a time|calendly|'
                  r'would like to (?:invite|speak|talk|chat)|gostariamos de (?:convidar|conversar|agendar)|agendar (?:uma )?(?:conversa|call|bate papo)|'
                  r'disponibilidade para (?:uma )?(?:conversa|call|bate papo)'),
@@ -31,7 +33,7 @@ STAGES=[
                 r'your application (?:to|for)|recebemos (?:a )?sua candidatura|agradecemos (?:a )?(?:sua )?candidatura|agradecemos por se candidatar|obrigad[oa] por (?:se candidatar|sua candidatura|seu interesse)|candidatura (?:foi )?(?:recebida|enviada|realizada)|'
                 r'inscricao (?:foi )?(?:recebida|realizada|confirmada)'),
 ]
-RANK={'verification':0,'unclassified':0,'received':1,'rejected':2,'assessment':3,'interview':4}
+RANK={'verification':0,'unclassified':0,'received':1,'screening':1.5,'rejected':2,'assessment':3,'interview':4}
 ADVANCED=('assessment','interview')
 ALERT_SENDERS=r'jobalert|job-alert|jobs-listings|alerts?@|newsletter|digest|marketing'
 SEARCH='-in:sent -in:chats (application OR applying OR candidatura OR candidato OR candidate OR vaga OR position OR interview OR entrevista OR processo OR assessment OR teste)'
@@ -166,7 +168,7 @@ class OutcomeTracker:
         def funnel(group):
             stages=[i['stage'] for i in group]
             return {'sent':len(group),'advanced':sum(s in ADVANCED for s in stages),'rejected':stages.count('rejected'),
-                    'received_only':stages.count('received'),'no_reply':stages.count('no_reply')+stages.count('unclassified'),
+                    'received_only':stages.count('received'),'screening':stages.count('screening'),'no_reply':stages.count('no_reply')+stages.count('unclassified'),
                     'advance_rate':round(sum(s in ADVANCED for s in stages)/len(group),3) if group else 0}
         groups=lambda key:{str(v):funnel([i for i in items if i[key]==v]) for v in sorted({i[key] for i in items},key=str)}
         return {'generated_at':now(),'total':funnel(items),'by_platform':groups('platform'),

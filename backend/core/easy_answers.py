@@ -301,6 +301,8 @@ class AnswerBook:
               CREATE TABLE IF NOT EXISTS easy_answer_tailored (
               answer_id INTEGER NOT NULL, job_url TEXT NOT NULL, value TEXT NOT NULL,
               refs TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(answer_id,job_url));''')
+        from .company_claims import CompanyClaims
+        self.claims = CompanyClaims(self.store)
 
     def context(self, question, job):
         q = normalized(question)
@@ -547,7 +549,7 @@ class AnswerBook:
                                   (base_key,job['url'])).fetchone()
         if override: context.update(json.loads(override[0]))
         answer = self.direct(field, context)
-        if answer: return answer
+        if answer: return self.claims.apply(field, job, answer)
         # Displayed option sets and units are identity. ATS-specific option IDs
         # are transport details, translated only after an exact label match.
         key = answer_key(field, context)
@@ -569,7 +571,7 @@ class AnswerBook:
             if approved and len({json.dumps(a[1],sort_keys=True) for a in approved}) == 1:
                 candidate,value,refs,original=approved[0]
                 db.execute('INSERT OR IGNORE INTO easy_answer_jobs VALUES(?,?)',(candidate['id'],job['url']))
-                return {'value':value,'refs':refs,'source':'cache','answer_id':candidate['id'],'approval_value':original}
+                return self.claims.apply(field, job, {'value':value,'refs':refs,'source':'cache','answer_id':candidate['id'],'approval_value':original})
             if not row and not approved:
                 row=next((r for r in equivalent if r['state'] in ('pending','proposed','stale')),None)
             if not row:

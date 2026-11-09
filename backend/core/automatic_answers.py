@@ -26,6 +26,13 @@ def code_identity(code):
 
 
 async def resolve_answer(book,field,job,metrics=None):
+    answer=await _resolve_answer(book,field,job,metrics)
+    # Autonomous answers bypass AnswerBook.resolve, so the company check runs here too.
+    claims=getattr(book,'claims',None)
+    return claims.apply(field,job,answer) if claims else answer
+
+
+async def _resolve_answer(book,field,job,metrics=None):
     answer=book.resolve(field,job)
     if not isinstance(answer.get('pending'),int):return answer
     data=book.store.directory

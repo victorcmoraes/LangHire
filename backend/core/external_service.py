@@ -14,6 +14,7 @@ from .application_safety import AttemptStore, SafetyError, job_key
 from .easy_answers import AnswerBook,normalized
 from .external_apply import execute_external,canonical_ats,platform_hold
 from .external_catalog import identity
+from .job_tracks import non_engineering
 
 
 def core_title(title):
@@ -53,6 +54,7 @@ def queue(data):
         key=(decision['platform'],decision['board'],decision['externalId']);job=by.get(key)
         if not job or job['platform'] not in ('lever','greenhouse','recruitee','gupy','ashby','workable'):continue
         if (job['platform'],job['board'].lower()) in excluded:continue
+        if non_engineering(job['title']):continue  # a triage saved before the rule existed
         title=core_title(job['title'])
         match=re.search(r'\b(?:job[\s-]*)?(\d{5})\b',job['title'],re.I)
         duplicate=(job['board'],match[1]) if match else (job['board'],title)
